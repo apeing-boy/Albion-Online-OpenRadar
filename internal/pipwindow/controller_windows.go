@@ -22,10 +22,11 @@ const (
 
 	monitorDefaultToNearest = 0x00000002
 
-	swpNoSize     = 0x0001
-	swpNoMove     = 0x0002
-	swpNoActivate = 0x0010
-	swpShowWindow = 0x0040
+	swpNoSize       = 0x0001
+	swpNoMove       = 0x0002
+	swpNoActivate   = 0x0010
+	swpFrameChanged = 0x0020
+	swpShowWindow   = 0x0040
 
 	vkLButton = 0x01
 	vkMenu    = 0x12
@@ -52,8 +53,9 @@ var (
 )
 
 var (
-	gwlExStyle  = ^uintptr(19) // -20 as an unsigned pointer-sized value.
-	hwndTopmost = ^uintptr(0)  // HWND_TOPMOST (-1).
+	gwlExStyle     = ^uintptr(19) // -20 as an unsigned pointer-sized value.
+	hwndTopmost    = ^uintptr(0)  // HWND_TOPMOST (-1).
+	hwndNotTopmost = ^uintptr(1)  // HWND_NOTOPMOST (-2).
 )
 
 type rect struct {
@@ -82,9 +84,11 @@ type point struct {
 }
 
 type windowsController struct {
-	mu           sync.Mutex
-	watched      uintptr
-	stopWatching chan struct{}
+	mu            sync.Mutex
+	watched       uintptr
+	originalStyle uintptr
+	stopWatching  chan struct{}
+	watchDone     chan struct{}
 }
 
 func NewController() Controller {
@@ -105,7 +109,8 @@ func (c *windowsController) Apply(config Config) error {
 		return err
 	}
 
-	if err := enableOverlayStyles(window.handle); err != nil {
+	exStyle, _, _ := procGetWindowLongPtrW.Call(window.handle, gwlExStyle)
+	if err := enableOverlayStyles(window.handle, exStyle); err != nil {
 		return err
 	}
 
@@ -139,12 +144,54 @@ func (c *windowsController) Apply(config Config) error {
 		return fmt.Errorf("keep Picture-in-Picture window on top: %w", callErr)
 	}
 
-	c.watch(window.handle)
+	c.watch(window.handle, exStyle)
 	return nil
 }
 
-func enableOverlayStyles(handle uintptr) error {
-	exStyle, _, _ := procGetWindowLongPtrW.Call(handle, gwlExStyle)
+func (c *windowsController) Stop() error {
+	handle, originalStyle, done := c.detachWatch()
+	if handle == 0 {
+		return nil
+	}
+
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	valid, _, _ := procIsWindow.Call(handle)
+	if valid == 0 {
+		return nil
+	}
+
+	result, _, callErr := procSetWindowLongPtrW.Call(handle, gwlExStyle, originalStyle)
+	if result == 0 && callErr != windows.ERROR_SUCCESS {
+		return fmt.Errorf("restore Picture-in-Picture window styles: %w", callErr)
+	}
+
+	insertAfter := hwndNotTopmost
+	if originalStyle&wsExTopmost != 0 {
+		insertAfter = hwndTopmost
+	}
+	result, _, callErr = procSetWindowPos.Call(
+		handle,
+		insertAfter,
+		0,
+		0,
+		0,
+		0,
+		swpNoMove|swpNoSize|swpNoActivate|swpFrameChanged,
+	)
+	if result == 0 {
+		return fmt.Errorf("restore Picture-in-Picture window position: %w", callErr)
+	}
+
+	return nil
+}
+
+func enableOverlayStyles(handle, exStyle uintptr) error {
 	overlayStyle := uintptr(wsExLayered | wsExTransparent | wsExNoActivate | wsExTopmost)
 	if exStyle&overlayStyle == overlayStyle {
 		return nil
@@ -157,26 +204,40 @@ func enableOverlayStyles(handle uintptr) error {
 	return nil
 }
 
-func (c *windowsController) watch(handle uintptr) {
+func (c *windowsController) watch(handle, originalStyle uintptr) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.watched == handle && c.stopWatching != nil {
+		c.mu.Unlock()
 		return
 	}
-	if c.stopWatching != nil {
-		close(c.stopWatching)
-	}
+	oldStop := c.stopWatching
+	oldDone := c.watchDone
 
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	c.watched = handle
+	c.originalStyle = originalStyle
 	c.stopWatching = stop
-	go c.overlayLoop(handle, stop)
+	c.watchDone = done
+	c.mu.Unlock()
+
+	if oldStop != nil {
+		close(oldStop)
+		if oldDone != nil {
+			select {
+			case <-oldDone:
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	}
+
+	go c.overlayLoop(handle, stop, done)
 }
 
-func (c *windowsController) overlayLoop(handle uintptr, stop <-chan struct{}) {
-	ticker := time.NewTicker(75 * time.Millisecond)
+func (c *windowsController) overlayLoop(handle uintptr, stop <-chan struct{}, done chan<- struct{}) {
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	defer close(done)
 
 	var (
 		dragging bool
@@ -193,6 +254,13 @@ func (c *windowsController) overlayLoop(handle uintptr, stop <-chan struct{}) {
 				c.clearWatch(handle, stop)
 				return
 			}
+			visible, _, _ := procIsWindowVisible.Call(handle)
+			if visible == 0 {
+				// Browser PiP windows can remain allocated after they are
+				// closed. Never resurrect one with SWP_SHOWWINDOW.
+				c.clearWatch(handle, stop)
+				return
+			}
 
 			// Fullscreen games can promote their own window after PiP was
 			// configured. Reasserting HWND_TOPMOST keeps the overlay above
@@ -204,7 +272,7 @@ func (c *windowsController) overlayLoop(handle uintptr, stop <-chan struct{}) {
 				0,
 				0,
 				0,
-				swpNoMove|swpNoSize|swpNoActivate|swpShowWindow,
+				swpNoMove|swpNoSize|swpNoActivate,
 			)
 
 			altDown := keyDown(vkMenu)
@@ -246,12 +314,31 @@ func (c *windowsController) overlayLoop(handle uintptr, stop <-chan struct{}) {
 	}
 }
 
+func (c *windowsController) detachWatch() (uintptr, uintptr, <-chan struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	handle := c.watched
+	originalStyle := c.originalStyle
+	done := c.watchDone
+	if c.stopWatching != nil {
+		close(c.stopWatching)
+	}
+	c.watched = 0
+	c.originalStyle = 0
+	c.stopWatching = nil
+	c.watchDone = nil
+	return handle, originalStyle, done
+}
+
 func (c *windowsController) clearWatch(handle uintptr, stop <-chan struct{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.watched == handle && c.stopWatching == stop {
 		c.watched = 0
+		c.originalStyle = 0
 		c.stopWatching = nil
+		c.watchDone = nil
 	}
 }
 
