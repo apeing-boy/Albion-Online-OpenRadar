@@ -16,7 +16,7 @@
 
         <button id="pipToggleBtn" class="btn btn-primary btn-sm" disabled style="display:none;">
             <i id="pipIcon" data-lucide="picture-in-picture-2" class="w-4 h-4"></i>
-            <span id="pipText" class="hidden sm:inline">PiP Mode</span>
+            <span id="pipText" class="hidden sm:inline">Overlay</span>
         </button>
     </div>
 </header>
@@ -48,7 +48,8 @@
 
         // PiP button
         if (pipBtn) {
-            const pipSupported = document.pictureInPictureEnabled === true;
+            const pipSupported = window.pipWindowControlSupported === true ||
+                document.pictureInPictureEnabled === true;
             pipBtn.style.display = (onRadar && pipSupported) ? 'flex' : 'none';
             pipBtn.disabled = !onRadar || !window.pipManager;
         }
@@ -90,12 +91,12 @@
             pipBtn.classList.remove('btn-primary');
             pipBtn.classList.add('btn-secondary');
             pipIcon.setAttribute('data-lucide', 'picture-in-picture');
-            pipText.textContent = 'Exit PiP';
+            pipText.textContent = 'Exit Overlay';
         } else {
             pipBtn.classList.remove('btn-secondary');
             pipBtn.classList.add('btn-primary');
             pipIcon.setAttribute('data-lucide', 'picture-in-picture-2');
-            pipText.textContent = 'PiP Mode';
+            pipText.textContent = 'Overlay';
         }
         // Re-render lucide icon
         if (window.lucide) window.lucide.createIcons();
@@ -127,6 +128,8 @@
             pipBtn.disabled = false;
         }
     });
+
+    document.addEventListener('pipWindowControlSupport', updateVisibility);
 
     // Listen to HTMX page changes
     document.body.addEventListener('htmx:afterSettle', (e) => {

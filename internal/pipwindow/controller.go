@@ -49,4 +49,5 @@ func (c Config) Validate() error {
 type Controller interface {
 	Supported() bool
 	Apply(Config) error
+	Stop() error
 }

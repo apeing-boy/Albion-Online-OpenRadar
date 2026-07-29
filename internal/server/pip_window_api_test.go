@@ -15,6 +15,8 @@ type fakePiPWindowController struct {
 	supported bool
 	applied   []pipwindow.Config
 	err       error
+	stopCalls int
+	stopErr   error
 }
 
 func (f *fakePiPWindowController) Supported() bool {
@@ -24,6 +26,11 @@ func (f *fakePiPWindowController) Supported() bool {
 func (f *fakePiPWindowController) Apply(config pipwindow.Config) error {
 	f.applied = append(f.applied, config)
 	return f.err
+}
+
+func (f *fakePiPWindowController) Stop() error {
+	f.stopCalls++
+	return f.stopErr
 }
 
 func newPiPWindowTestMux(controller pipwindow.Controller) *http.ServeMux {
@@ -136,5 +143,39 @@ func TestPiPWindowAPIPostReportsUnsupportedPlatform(t *testing.T) {
 
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("status %d, want 501", rec.Code)
+	}
+}
+
+func TestPiPWindowAPIDeleteStopsController(t *testing.T) {
+	controller := &fakePiPWindowController{supported: true}
+	mux := newPiPWindowTestMux(controller)
+	req := httptest.NewRequest(http.MethodDelete, "/api/pip-window", http.NoBody)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if controller.stopCalls != 1 {
+		t.Fatalf("Stop calls=%d, want 1", controller.stopCalls)
+	}
+}
+
+func TestPiPWindowAPIDeleteRequiresLoopback(t *testing.T) {
+	controller := &fakePiPWindowController{supported: true}
+	mux := newPiPWindowTestMux(controller)
+	req := httptest.NewRequest(http.MethodDelete, "/api/pip-window", http.NoBody)
+	req.RemoteAddr = "192.168.1.42:1234"
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403", rec.Code)
+	}
+	if controller.stopCalls != 0 {
+		t.Fatalf("Stop calls=%d, want 0", controller.stopCalls)
 	}
 }
