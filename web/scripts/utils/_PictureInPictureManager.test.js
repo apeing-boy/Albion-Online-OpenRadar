@@ -5,6 +5,7 @@ describe('PictureInPictureManager native window controls', () => {
     beforeEach(() => {
         pictureInPictureManager.isActive = true;
         pictureInPictureManager.windowControlSupported = true;
+        pictureInPictureManager.lifecycleGeneration = 0;
         window.settingsSync = {
             getNumber: vi.fn(() => 65),
             get: vi.fn(() => 'top-right'),
@@ -48,5 +49,37 @@ describe('PictureInPictureManager native window controls', () => {
 
         expect(applied).toBe(false);
         expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('releases native controls before closing PiP', async () => {
+        const exitPictureInPicture = vi.fn(async () => {});
+        Object.defineProperty(document, 'pictureInPictureElement', {
+            configurable: true,
+            value: {}
+        });
+        Object.defineProperty(document, 'exitPictureInPicture', {
+            configurable: true,
+            value: exitPictureInPicture
+        });
+
+        await pictureInPictureManager.stop();
+
+        expect(fetch).toHaveBeenCalledWith('/api/pip-window', {method: 'DELETE'});
+        expect(exitPictureInPicture).toHaveBeenCalledOnce();
+        expect(fetch.mock.invocationCallOrder[0]).toBeLessThan(
+            exitPictureInPicture.mock.invocationCallOrder[0]
+        );
+    });
+
+    test('cancels delayed window retries after PiP stops', async () => {
+        globalThis.fetch = vi.fn(async () => ({ok: false, status: 409}));
+        const applyPromise = pictureInPictureManager.applyWindowSettings({retry: true});
+        await Promise.resolve();
+
+        pictureInPictureManager.lifecycleGeneration++;
+        pictureInPictureManager.isActive = false;
+
+        expect(await applyPromise).toBe(false);
+        expect(fetch).toHaveBeenCalledTimes(1);
     });
 });
