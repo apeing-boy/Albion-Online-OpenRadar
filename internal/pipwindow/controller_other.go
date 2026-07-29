@@ -15,3 +15,7 @@ func (unsupportedController) Supported() bool {
 func (unsupportedController) Apply(Config) error {
 	return ErrNotSupported
 }
+
+func (unsupportedController) Stop() error {
+	return ErrNotSupported
+}
