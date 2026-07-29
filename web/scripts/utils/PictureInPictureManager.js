@@ -10,6 +10,7 @@ class PictureInPictureManager {
         this.canvasManager = null;
         this.size = 500;
         this.windowControlSupported = false;
+        this.lifecycleGeneration = 0;
         this._onCanvasSizeChanged = null;
         this._onLeavePip = null;
     }
@@ -106,6 +107,7 @@ class PictureInPictureManager {
         }
 
         try {
+            this.lifecycleGeneration++;
             this.compositeFrame();
             this.stream = this.pipCanvas.captureStream(30);
             this.videoElement.srcObject = this.stream;
@@ -141,6 +143,9 @@ class PictureInPictureManager {
     }
 
     async stop() {
+        this.lifecycleGeneration++;
+        await this.releaseWindowControls();
+
         try {
             if (document.pictureInPictureElement) {
                 await document.exitPictureInPicture();
@@ -153,6 +158,8 @@ class PictureInPictureManager {
     }
 
     onPipClosed() {
+        this.lifecycleGeneration++;
+        void this.releaseWindowControls();
         this.cleanup();
         this.dispatchStatusEvent('stopped');
     }
@@ -191,10 +198,17 @@ class PictureInPictureManager {
             return false;
         }
 
+        const generation = this.lifecycleGeneration;
         const attempts = retry ? 8 : 1;
         for (let attempt = 0; attempt < attempts; attempt++) {
+            if (!this.isActive || generation !== this.lifecycleGeneration) {
+                return false;
+            }
             if (attempt > 0) {
                 await new Promise(resolve => setTimeout(resolve, 125 * attempt));
+                if (!this.isActive || generation !== this.lifecycleGeneration) {
+                    return false;
+                }
             }
 
             try {
@@ -222,6 +236,22 @@ class PictureInPictureManager {
 
         window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_WindowNotFound', {});
         return false;
+    }
+
+    async releaseWindowControls() {
+        if (!this.windowControlSupported) {
+            return false;
+        }
+
+        try {
+            const response = await fetch('/api/pip-window', {method: 'DELETE'});
+            return response.ok;
+        } catch (error) {
+            window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_WindowControlsReleaseFailed', {
+                error: error?.message
+            });
+            return false;
+        }
     }
 
     setWindowOpacity(opacity) {
@@ -272,6 +302,8 @@ class PictureInPictureManager {
     }
 
     destroy() {
+        this.lifecycleGeneration++;
+        void this.releaseWindowControls();
         if (document.pictureInPictureElement) {
             document.exitPictureInPicture().catch((e) => {
                 window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_DestroyExitFailed', {error: e?.message});
