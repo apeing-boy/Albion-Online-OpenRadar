@@ -164,6 +164,10 @@ Coming in v2.3: a Dungeons database for Avalonian and per-difficulty filters, ch
 
 Playing fullscreen? Pop the radar into a floating window that stays on top. Native browser PiP, one click.
 
+On Windows, the radar controls also include PiP opacity (20-100%) and placement presets for each screen corner or
+the center. Choose **Keep position** to leave a manually dragged PiP window where it is. These native window controls
+are available only from `localhost`; second-device and Linux clients keep the browser's standard PiP behavior.
+
 ### Zone-Aware Alerts
 
 The radar knows where you are. Safe zone? Quiet. Black Zone? Every player is a threat. Visual flash + audio alert when

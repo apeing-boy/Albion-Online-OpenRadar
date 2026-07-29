@@ -14,6 +14,7 @@ import (
 
 	"github.com/nospy/albion-openradar/internal/capture"
 	"github.com/nospy/albion-openradar/internal/logger"
+	"github.com/nospy/albion-openradar/internal/pipwindow"
 	"github.com/nospy/albion-openradar/internal/templates"
 )
 
@@ -31,12 +32,13 @@ type HTTPServer struct {
 	sounds  fs.FS
 	styles  fs.FS
 	// Template engine
-	tmpl        *templates.Engine
-	version     string
-	assetID     string
-	devMode     bool
-	networkAPI  *NetworkAPI
-	settingsAPI *SettingsAPI
+	tmpl         *templates.Engine
+	version      string
+	assetID      string
+	devMode      bool
+	networkAPI   *NetworkAPI
+	settingsAPI  *SettingsAPI
+	pipWindowAPI *PiPWindowAPI
 }
 
 // buildID fingerprints the embedded assets. It is empty for an unversioned build,
@@ -120,6 +122,7 @@ func NewHTTPServer(
 		s.networkAPI = NewNetworkAPI(mgr, allInterfaces, appDir, capture.LANAddresses)
 	}
 	s.settingsAPI = NewSettingsAPI(appDir, log, recorder, captureDir)
+	s.pipWindowAPI = NewPiPWindowAPI(pipwindow.NewController())
 	s.setupRoutes()
 	return s, nil
 }
@@ -164,6 +167,7 @@ func NewHTTPServerDev(
 		s.networkAPI = NewNetworkAPI(mgr, allInterfaces, appDir, capture.LANAddresses)
 	}
 	s.settingsAPI = NewSettingsAPI(appDir, log, recorder, captureDir)
+	s.pipWindowAPI = NewPiPWindowAPI(pipwindow.NewController())
 	s.setupRoutes()
 	return s, nil
 }
@@ -208,6 +212,9 @@ func (s *HTTPServer) setupRoutes() {
 	// API endpoints
 	apiMux := http.NewServeMux()
 	s.settingsAPI.Register(apiMux)
+	if s.pipWindowAPI != nil {
+		s.pipWindowAPI.Register(apiMux)
+	}
 	if s.networkAPI != nil {
 		s.networkAPI.Register(apiMux)
 	}
