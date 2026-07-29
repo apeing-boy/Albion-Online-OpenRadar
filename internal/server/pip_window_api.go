@@ -20,6 +20,24 @@ func NewPiPWindowAPI(controller pipwindow.Controller) *PiPWindowAPI {
 func (a *PiPWindowAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/pip-window", a.handleGet)
 	mux.HandleFunc("POST /api/pip-window", a.handlePost)
+	mux.HandleFunc("DELETE /api/pip-window", a.handleDelete)
+}
+
+func (a *PiPWindowAPI) handleDelete(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r.RemoteAddr) {
+		http.Error(w, "Picture-in-Picture window controls can only be changed from the host PC", http.StatusForbidden)
+		return
+	}
+	if a.controller == nil || !a.controller.Supported() {
+		http.Error(w, pipwindow.ErrNotSupported.Error(), http.StatusNotImplemented)
+		return
+	}
+	if err := a.controller.Stop(); err != nil {
+		http.Error(w, "stop Picture-in-Picture window controls: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (a *PiPWindowAPI) handleGet(w http.ResponseWriter, r *http.Request) {
