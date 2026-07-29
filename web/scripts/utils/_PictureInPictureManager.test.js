@@ -16,7 +16,14 @@ describe('PictureInPictureManager native window controls', () => {
     });
 
     afterEach(() => {
+        if (pictureInPictureManager.overlayCloseTimer) {
+            clearInterval(pictureInPictureManager.overlayCloseTimer);
+        }
         pictureInPictureManager.isActive = false;
+        pictureInPictureManager.mode = null;
+        pictureInPictureManager.overlayWindow = null;
+        pictureInPictureManager.overlayVideo = null;
+        pictureInPictureManager.overlayCloseTimer = null;
         pictureInPictureManager.windowControlSupported = false;
         delete window.settingsSync;
         vi.restoreAllMocks();
@@ -69,6 +76,19 @@ describe('PictureInPictureManager native window controls', () => {
         expect(fetch.mock.invocationCallOrder[0]).toBeLessThan(
             exitPictureInPicture.mock.invocationCallOrder[0]
         );
+    });
+
+    test('releases native controls before closing the overlay window', async () => {
+        const close = vi.fn();
+        pictureInPictureManager.mode = 'overlay';
+        pictureInPictureManager.overlayWindow = {close, closed: false};
+
+        await pictureInPictureManager.stop();
+
+        expect(fetch).toHaveBeenCalledWith('/api/pip-window', {method: 'DELETE'});
+        expect(close).toHaveBeenCalledOnce();
+        expect(fetch.mock.invocationCallOrder[0]).toBeLessThan(close.mock.invocationCallOrder[0]);
+        expect(pictureInPictureManager.isActive).toBe(false);
     });
 
     test('cancels delayed window retries after PiP stops', async () => {
