@@ -418,3 +418,28 @@ func positionFor(window candidate, position string, margin int) (int32, int32, e
 		return info.Work.Left + gap, info.Work.Top + gap, nil
 	case PositionTopRight:
 		return info.Work.Right - width - gap, info.Work.Top + gap, nil
+	case PositionBottomLeft:
+		return info.Work.Left + gap, info.Work.Bottom - height - gap, nil
+	case PositionBottomRight:
+		return info.Work.Right - width - gap, info.Work.Bottom - height - gap, nil
+	case PositionCenter:
+		return info.Work.Left + (info.Work.Right-info.Work.Left-width)/2,
+			info.Work.Top + (info.Work.Bottom-info.Work.Top-height)/2, nil
+	default:
+		return 0, 0, fmt.Errorf("unsupported position %q", position)
+	}
+}
+
+func rectArea(bounds rect) int {
+	if bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top {
+		return int(^uint(0) >> 1)
+	}
+	return int(bounds.Right-bounds.Left) * int(bounds.Bottom-bounds.Top)
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
