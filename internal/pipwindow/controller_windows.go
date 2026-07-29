@@ -6,32 +6,43 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 const (
-	wsExLayered = 0x00080000
-	wsExTopmost = 0x00000008
-	lwaAlpha    = 0x00000002
+	wsExLayered     = 0x00080000
+	wsExNoActivate  = 0x08000000
+	wsExTopmost     = 0x00000008
+	wsExTransparent = 0x00000020
+	lwaAlpha        = 0x00000002
 
 	monitorDefaultToNearest = 0x00000002
 
 	swpNoSize     = 0x0001
+	swpNoMove     = 0x0002
 	swpNoActivate = 0x0010
 	swpShowWindow = 0x0040
+
+	vkLButton = 0x01
+	vkMenu    = 0x12
 )
 
 var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 
 	procEnumWindows                = user32.NewProc("EnumWindows")
+	procGetAsyncKeyState           = user32.NewProc("GetAsyncKeyState")
 	procGetClassNameW              = user32.NewProc("GetClassNameW")
+	procGetCursorPos               = user32.NewProc("GetCursorPos")
 	procGetWindowLongPtrW          = user32.NewProc("GetWindowLongPtrW")
 	procGetWindowRect              = user32.NewProc("GetWindowRect")
 	procGetWindowTextLengthW       = user32.NewProc("GetWindowTextLengthW")
 	procGetWindowTextW             = user32.NewProc("GetWindowTextW")
+	procIsWindow                   = user32.NewProc("IsWindow")
 	procIsWindowVisible            = user32.NewProc("IsWindowVisible")
 	procMonitorFromWindow          = user32.NewProc("MonitorFromWindow")
 	procGetMonitorInfoW            = user32.NewProc("GetMonitorInfoW")
@@ -65,17 +76,26 @@ type candidate struct {
 	score  int
 }
 
-type windowsController struct{}
-
-func NewController() Controller {
-	return windowsController{}
+type point struct {
+	X int32
+	Y int32
 }
 
-func (windowsController) Supported() bool {
+type windowsController struct {
+	mu           sync.Mutex
+	watched      uintptr
+	stopWatching chan struct{}
+}
+
+func NewController() Controller {
+	return &windowsController{}
+}
+
+func (*windowsController) Supported() bool {
 	return true
 }
 
-func (windowsController) Apply(config Config) error {
+func (c *windowsController) Apply(config Config) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -85,12 +105,8 @@ func (windowsController) Apply(config Config) error {
 		return err
 	}
 
-	exStyle, _, _ := procGetWindowLongPtrW.Call(window.handle, gwlExStyle)
-	if exStyle&wsExLayered == 0 {
-		result, _, callErr := procSetWindowLongPtrW.Call(window.handle, gwlExStyle, exStyle|wsExLayered)
-		if result == 0 && callErr != windows.ERROR_SUCCESS {
-			return fmt.Errorf("enable window transparency: %w", callErr)
-		}
+	if err := enableOverlayStyles(window.handle); err != nil {
+		return err
 	}
 
 	alpha := byte((config.Opacity*255 + 50) / 100)
@@ -99,13 +115,15 @@ func (windowsController) Apply(config Config) error {
 		return fmt.Errorf("set window opacity: %w", callErr)
 	}
 
+	var x, y int32
+	flags := uintptr(swpNoSize | swpNoActivate | swpShowWindow)
 	if config.Position == PositionCurrent {
-		return nil
-	}
-
-	x, y, err := positionFor(window, config.Position, config.Margin)
-	if err != nil {
-		return err
+		flags |= swpNoMove
+	} else {
+		x, y, err = positionFor(window, config.Position, config.Margin)
+		if err != nil {
+			return err
+		}
 	}
 
 	result, _, callErr = procSetWindowPos.Call(
@@ -115,13 +133,142 @@ func (windowsController) Apply(config Config) error {
 		uintptr(y),
 		0,
 		0,
-		swpNoSize|swpNoActivate|swpShowWindow,
+		flags,
 	)
 	if result == 0 {
-		return fmt.Errorf("move Picture-in-Picture window: %w", callErr)
+		return fmt.Errorf("keep Picture-in-Picture window on top: %w", callErr)
 	}
 
+	c.watch(window.handle)
 	return nil
+}
+
+func enableOverlayStyles(handle uintptr) error {
+	exStyle, _, _ := procGetWindowLongPtrW.Call(handle, gwlExStyle)
+	overlayStyle := uintptr(wsExLayered | wsExTransparent | wsExNoActivate | wsExTopmost)
+	if exStyle&overlayStyle == overlayStyle {
+		return nil
+	}
+
+	result, _, callErr := procSetWindowLongPtrW.Call(handle, gwlExStyle, exStyle|overlayStyle)
+	if result == 0 && callErr != windows.ERROR_SUCCESS {
+		return fmt.Errorf("enable click-through overlay: %w", callErr)
+	}
+	return nil
+}
+
+func (c *windowsController) watch(handle uintptr) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.watched == handle && c.stopWatching != nil {
+		return
+	}
+	if c.stopWatching != nil {
+		close(c.stopWatching)
+	}
+
+	stop := make(chan struct{})
+	c.watched = handle
+	c.stopWatching = stop
+	go c.overlayLoop(handle, stop)
+}
+
+func (c *windowsController) overlayLoop(handle uintptr, stop <-chan struct{}) {
+	ticker := time.NewTicker(75 * time.Millisecond)
+	defer ticker.Stop()
+
+	var (
+		dragging bool
+		offset   point
+	)
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			valid, _, _ := procIsWindow.Call(handle)
+			if valid == 0 {
+				c.clearWatch(handle, stop)
+				return
+			}
+
+			// Fullscreen games can promote their own window after PiP was
+			// configured. Reasserting HWND_TOPMOST keeps the overlay above
+			// borderless/windowed-fullscreen games without activating it.
+			_, _, _ = procSetWindowPos.Call(
+				handle,
+				hwndTopmost,
+				0,
+				0,
+				0,
+				0,
+				swpNoMove|swpNoSize|swpNoActivate|swpShowWindow,
+			)
+
+			altDown := keyDown(vkMenu)
+			leftDown := keyDown(vkLButton)
+			if !altDown || !leftDown {
+				dragging = false
+				continue
+			}
+
+			cursor, ok := cursorPosition()
+			if !ok {
+				continue
+			}
+
+			var bounds rect
+			okResult, _, _ := procGetWindowRect.Call(handle, uintptr(unsafe.Pointer(&bounds)))
+			if okResult == 0 {
+				continue
+			}
+
+			if !dragging {
+				if !pointInside(cursor, bounds) {
+					continue
+				}
+				dragging = true
+				offset = point{X: cursor.X - bounds.Left, Y: cursor.Y - bounds.Top}
+			}
+
+			_, _, _ = procSetWindowPos.Call(
+				handle,
+				hwndTopmost,
+				uintptr(cursor.X-offset.X),
+				uintptr(cursor.Y-offset.Y),
+				0,
+				0,
+				swpNoSize|swpNoActivate|swpShowWindow,
+			)
+		}
+	}
+}
+
+func (c *windowsController) clearWatch(handle uintptr, stop <-chan struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.watched == handle && c.stopWatching == stop {
+		c.watched = 0
+		c.stopWatching = nil
+	}
+}
+
+func keyDown(virtualKey uintptr) bool {
+	state, _, _ := procGetAsyncKeyState.Call(virtualKey)
+	return state&0x8000 != 0
+}
+
+func cursorPosition() (point, bool) {
+	var cursor point
+	result, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor)))
+	return cursor, result != 0
+}
+
+func pointInside(cursor point, bounds rect) bool {
+	return cursor.X >= bounds.Left && cursor.X < bounds.Right &&
+		cursor.Y >= bounds.Top && cursor.Y < bounds.Bottom
 }
 
 func findPictureInPictureWindow() (candidate, error) {
@@ -271,28 +418,3 @@ func positionFor(window candidate, position string, margin int) (int32, int32, e
 		return info.Work.Left + gap, info.Work.Top + gap, nil
 	case PositionTopRight:
 		return info.Work.Right - width - gap, info.Work.Top + gap, nil
-	case PositionBottomLeft:
-		return info.Work.Left + gap, info.Work.Bottom - height - gap, nil
-	case PositionBottomRight:
-		return info.Work.Right - width - gap, info.Work.Bottom - height - gap, nil
-	case PositionCenter:
-		return info.Work.Left + (info.Work.Right-info.Work.Left-width)/2,
-			info.Work.Top + (info.Work.Bottom-info.Work.Top-height)/2, nil
-	default:
-		return 0, 0, fmt.Errorf("unsupported position %q", position)
-	}
-}
-
-func rectArea(bounds rect) int {
-	if bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top {
-		return int(^uint(0) >> 1)
-	}
-	return int(bounds.Right-bounds.Left) * int(bounds.Bottom-bounds.Top)
-}
-
-func abs(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
-}
