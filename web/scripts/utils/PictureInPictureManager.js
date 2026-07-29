@@ -9,6 +9,7 @@ class PictureInPictureManager {
         this.isActive = false;
         this.canvasManager = null;
         this.size = 500;
+        this.windowControlSupported = false;
         this._onCanvasSizeChanged = null;
         this._onLeavePip = null;
     }
@@ -28,8 +29,28 @@ class PictureInPictureManager {
         this.createPipCanvas();
         this.createVideoElement();
         this.setupEventListeners();
+        void this.detectWindowControlSupport();
 
         return true;
+    }
+
+    async detectWindowControlSupport() {
+        try {
+            const response = await fetch('/api/pip-window');
+            if (response.ok) {
+                const result = await response.json();
+                this.windowControlSupported = result.supported === true;
+            }
+        } catch (error) {
+            window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_WindowControlDetectionFailed', {
+                error: error?.message
+            });
+        }
+
+        window.pipWindowControlSupported = this.windowControlSupported;
+        document.dispatchEvent(new CustomEvent('pipWindowControlSupport', {
+            detail: {supported: this.windowControlSupported}
+        }));
     }
 
     createPipCanvas() {
@@ -110,6 +131,7 @@ class PictureInPictureManager {
 
             this.isActive = true;
             this.dispatchStatusEvent('started');
+            void this.applyWindowSettings({retry: true});
 
             return true;
         } catch (error) {
@@ -153,6 +175,73 @@ class PictureInPictureManager {
         if (this.isActive) {
             this.compositeFrame();
         }
+    }
+
+    getWindowSettings() {
+        const settingsSync = window.settingsSync;
+        const rawOpacity = settingsSync?.getNumber('settingPipOpacity', 100) ?? 100;
+        const opacity = Math.max(20, Math.min(100, rawOpacity));
+        const position = settingsSync?.get('settingPipPosition', 'current') || 'current';
+
+        return {opacity, position, margin: 12};
+    }
+
+    async applyWindowSettings({retry = false} = {}) {
+        if (!this.isActive || !this.windowControlSupported) {
+            return false;
+        }
+
+        const attempts = retry ? 8 : 1;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            if (attempt > 0) {
+                await new Promise(resolve => setTimeout(resolve, 125 * attempt));
+            }
+
+            try {
+                const response = await fetch('/api/pip-window', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(this.getWindowSettings())
+                });
+                if (response.ok) {
+                    return true;
+                }
+                if (response.status !== 409) {
+                    window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_WindowSettingsRejected', {
+                        status: response.status
+                    });
+                    return false;
+                }
+            } catch (error) {
+                window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_WindowSettingsFailed', {
+                    error: error?.message
+                });
+                return false;
+            }
+        }
+
+        window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_WindowNotFound', {});
+        return false;
+    }
+
+    setWindowOpacity(opacity) {
+        const value = Math.max(20, Math.min(100, Number(opacity) || 100));
+        window.settingsSync?.setNumber('settingPipOpacity', value);
+        return this.applyWindowSettings();
+    }
+
+    setWindowPosition(position) {
+        const allowed = new Set([
+            'current',
+            'top-left',
+            'top-right',
+            'bottom-left',
+            'bottom-right',
+            'center'
+        ]);
+        const value = allowed.has(position) ? position : 'current';
+        window.settingsSync?.set('settingPipPosition', value);
+        return this.applyWindowSettings();
     }
 
     compositeFrame() {
@@ -210,6 +299,7 @@ class PictureInPictureManager {
         this.pipCanvas = null;
         this.pipCtx = null;
         this.canvasManager = null;
+        this.windowControlSupported = false;
     }
 
     isSupported() {

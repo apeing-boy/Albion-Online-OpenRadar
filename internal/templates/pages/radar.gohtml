@@ -66,6 +66,21 @@
                     <span id="iconSizeValue" class="text-xs text-base-content/60 font-mono w-10">100%</span>
                     <button id="iconSizeReset" class="btn btn-ghost btn-xs text-xs">Reset</button>
                 </div>
+                <!-- Native Windows PiP controls -->
+                <div id="pipWindowControls" class="items-center gap-2" style="display:none;">
+                    <span class="text-xs text-base-content/50">PiP opacity:</span>
+                    <input type="range" id="settingPipOpacity" min="20" max="100" step="5" value="100"
+                           class="range range-primary range-xs w-24">
+                    <span id="pipOpacityValue" class="text-xs text-base-content/60 font-mono w-10">100%</span>
+                    <select id="settingPipPosition" class="select select-bordered select-xs">
+                        <option value="current">Keep position</option>
+                        <option value="top-left">Top left</option>
+                        <option value="top-right">Top right</option>
+                        <option value="bottom-left">Bottom left</option>
+                        <option value="bottom-right">Bottom right</option>
+                        <option value="center">Center</option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>
@@ -245,6 +260,60 @@ window.onGlobalsReady(function() {
     addListener(iconSizeUp, 'click', () => setIconSize((settingsSync.getFloat('settingIconSize') || 1.0) + 0.1));
     addListener(iconSizeDown, 'click', () => setIconSize((settingsSync.getFloat('settingIconSize') || 1.0) - 0.1));
     addListener(iconSizeReset, 'click', () => setIconSize(1.0));
+
+    // Windows Picture-in-Picture opacity and placement controls
+    const pipWindowControls = document.getElementById('pipWindowControls');
+    const pipOpacitySlider = document.getElementById('settingPipOpacity');
+    const pipOpacityValue = document.getElementById('pipOpacityValue');
+    const pipPosition = document.getElementById('settingPipPosition');
+    let pipOpacityTimer = null;
+
+    function setPipControlsSupported(supported) {
+        if (pipWindowControls) {
+            pipWindowControls.style.display = supported ? 'flex' : 'none';
+        }
+    }
+
+    function updatePipOpacityDisplay(value) {
+        const opacity = Math.max(20, Math.min(100, Number(value) || 100));
+        if (pipOpacitySlider) pipOpacitySlider.value = opacity;
+        if (pipOpacityValue) pipOpacityValue.textContent = `${opacity}%`;
+        return opacity;
+    }
+
+    const initialPipOpacity = settingsSync.getNumber('settingPipOpacity', 100);
+    const initialPipPosition = settingsSync.get('settingPipPosition', 'current') || 'current';
+    updatePipOpacityDisplay(initialPipOpacity);
+    if (pipPosition) pipPosition.value = initialPipPosition;
+    setPipControlsSupported(window.pipWindowControlSupported === true);
+
+    addListener(document, 'pipWindowControlSupport', (event) => {
+        setPipControlsSupported(event.detail?.supported === true);
+    });
+
+    addListener(pipOpacitySlider, 'input', () => {
+        const opacity = updatePipOpacityDisplay(pipOpacitySlider.value);
+        clearTimeout(pipOpacityTimer);
+        pipOpacityTimer = setTimeout(() => {
+            if (window.pipManager) {
+                void window.pipManager.setWindowOpacity(opacity);
+            } else {
+                settingsSync.setNumber('settingPipOpacity', opacity);
+            }
+        }, 80);
+    });
+
+    addListener(pipPosition, 'change', () => {
+        if (window.pipManager) {
+            void window.pipManager.setWindowPosition(pipPosition.value);
+        } else {
+            settingsSync.set('settingPipPosition', pipPosition.value);
+        }
+    });
+
+    cleanup.push(() => {
+        if (pipOpacityTimer) clearTimeout(pipOpacityTimer);
+    });
 
     // Canvas Size controls
     const sizeSlider = document.getElementById('settingCanvasSize');
