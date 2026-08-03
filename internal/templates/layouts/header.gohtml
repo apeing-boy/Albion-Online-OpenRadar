@@ -46,11 +46,10 @@
             }
         }
 
-        // PiP button
+        // Native overlay button
         if (pipBtn) {
-            const pipSupported = window.pipWindowControlSupported === true ||
-                document.pictureInPictureEnabled === true;
-            pipBtn.style.display = (onRadar && pipSupported) ? 'flex' : 'none';
+            const overlaySupported = window.pipWindowControlSupported === true;
+            pipBtn.style.display = (onRadar && overlaySupported) ? 'flex' : 'none';
             pipBtn.disabled = !onRadar || !window.pipManager;
         }
     }
@@ -102,7 +101,7 @@
         if (window.lucide) window.lucide.createIcons();
     }
 
-    // PiP button click handler
+    // Native overlay button click handler
     if (pipBtn) {
         pipBtn.addEventListener('click', async () => {
             if (window.pipManager) {
@@ -112,7 +111,7 @@
         });
     }
 
-    // Listen to PiP status changes (e.g., when user closes PiP window)
+    // Listen to overlay status changes (e.g., when user closes the window)
     document.addEventListener('pipStatusChange', (e) => {
         updatePipButton(e.detail.isActive);
     });
