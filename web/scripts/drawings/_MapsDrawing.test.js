@@ -23,11 +23,13 @@ vi.mock('../data/ZonesDatabase.js', () => ({
     default: {
         getMapAssetExtent: vi.fn(() => 825),
         getMapAssetCenter: vi.fn(() => ({x: 0, y: 0})),
+        getZoneFile: vi.fn(() => '0212_WRL_MN_AUTO_T4_UND_ROY'),
     },
 }));
 
 const {MapDrawing} = await import('./MapsDrawing.js');
 const zonesDatabase = (await import('../data/ZonesDatabase.js')).default;
+const imageCache = (await import('../utils/ImageCache.js')).default;
 
 function buildCtx() {
     return {
@@ -91,6 +93,30 @@ describe('MapsDrawing per-zone asset extent', () => {
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(0, 6);
         expect(tr[1]).toBeCloseTo(0, 6);
+    });
+
+    test('loads the renamed game map asset from the zone database', () => {
+        const map = {id: '0212', hX: 0, hY: 0};
+
+        drawing.draw(ctx, map);
+
+        expect(zonesDatabase.getZoneFile).toHaveBeenCalledWith('0212');
+        expect(imageCache.GetPreloadedImage).toHaveBeenCalledWith(
+            '/images/Maps/game/0212_WRL_MN_AUTO_T4_UND_ROY.webp',
+            'Maps',
+        );
+    });
+
+    test('falls back to the legacy id-based map path when zone metadata has no file', () => {
+        zonesDatabase.getZoneFile.mockReturnValueOnce(null);
+        const map = {id: '0212', hX: 0, hY: 0};
+
+        drawing.draw(ctx, map);
+
+        expect(imageCache.GetPreloadedImage).toHaveBeenCalledWith(
+            '/images/Maps/0212.webp',
+            'Maps',
+        );
     });
 
     // @verified 2026-05-14: synthetic. 5002 Bank: extent 170, center (5, -75). Player at origin.
