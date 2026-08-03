@@ -23,10 +23,12 @@ describe('PictureInPictureManager native window controls', () => {
         pictureInPictureManager.isActive = false;
         pictureInPictureManager.mode = null;
         pictureInPictureManager.overlayWindow = null;
-        pictureInPictureManager.overlayVideo = null;
+        pictureInPictureManager.overlayCanvas = null;
+        pictureInPictureManager.overlayCtx = null;
         pictureInPictureManager.overlayCloseTimer = null;
         pictureInPictureManager.windowControlSupported = false;
         pictureInPictureManager.radarRenderer = null;
+        pictureInPictureManager.canvasManager = null;
         delete window.settingsSync;
         vi.restoreAllMocks();
     });
@@ -51,33 +53,13 @@ describe('PictureInPictureManager native window controls', () => {
         expect(applySpy).toHaveBeenCalledOnce();
     });
 
-    test('does not call the backend when the PiP window is closed', async () => {
+    test('does not call the backend when the overlay window is closed', async () => {
         pictureInPictureManager.isActive = false;
 
         const applied = await pictureInPictureManager.applyWindowSettings();
 
         expect(applied).toBe(false);
         expect(fetch).not.toHaveBeenCalled();
-    });
-
-    test('releases native controls before closing PiP', async () => {
-        const exitPictureInPicture = vi.fn(async () => {});
-        Object.defineProperty(document, 'pictureInPictureElement', {
-            configurable: true,
-            value: {}
-        });
-        Object.defineProperty(document, 'exitPictureInPicture', {
-            configurable: true,
-            value: exitPictureInPicture
-        });
-
-        await pictureInPictureManager.stop();
-
-        expect(fetch).toHaveBeenCalledWith('/api/pip-window', {method: 'DELETE'});
-        expect(exitPictureInPicture).toHaveBeenCalledOnce();
-        expect(fetch.mock.invocationCallOrder[0]).toBeLessThan(
-            exitPictureInPicture.mock.invocationCallOrder[0]
-        );
     });
 
     test('releases native controls before closing the overlay window', async () => {
@@ -93,7 +75,7 @@ describe('PictureInPictureManager native window controls', () => {
         expect(pictureInPictureManager.isActive).toBe(false);
     });
 
-    test('cancels delayed window retries after PiP stops', async () => {
+    test('cancels delayed window retries after overlay stops', async () => {
         globalThis.fetch = vi.fn(async () => ({ok: false, status: 409}));
         const applyPromise = pictureInPictureManager.applyWindowSettings({retry: true});
         await Promise.resolve();
@@ -128,5 +110,43 @@ describe('PictureInPictureManager native window controls', () => {
         expect(pictureInPictureManager.getInfoBarHeight(300)).toBe(38);
         expect(pictureInPictureManager.getInfoBarHeight(500)).toBe(50);
         expect(pictureInPictureManager.getInfoBarHeight(800)).toBe(56);
+    });
+
+    test('composites radar layers directly into the overlay canvas', () => {
+        const drawImage = vi.fn();
+        const clearRect = vi.fn();
+        pictureInPictureManager.overlayCanvas = {width: 500, height: 550};
+        pictureInPictureManager.overlayCtx = {clearRect, drawImage};
+        pictureInPictureManager.canvasManager = {
+            canvases: {
+                mapCanvas: {width: 500},
+                drawCanvas: {},
+                ourPlayerCanvas: {},
+                uiCanvas: {}
+            }
+        };
+        const barSpy = vi.spyOn(pictureInPictureManager, 'drawCoordinateBar').mockImplementation(() => {});
+
+        pictureInPictureManager.compositeFrame();
+
+        expect(clearRect).toHaveBeenCalledWith(0, 0, 500, 550);
+        expect(drawImage).toHaveBeenCalledTimes(4);
+        expect(barSpy).toHaveBeenCalledWith(pictureInPictureManager.overlayCtx, 500, 50);
+    });
+
+    test('does not expose browser Picture-in-Picture as a fallback', () => {
+        pictureInPictureManager.windowControlSupported = false;
+        const originalValue = document.pictureInPictureEnabled;
+        Object.defineProperty(document, 'pictureInPictureEnabled', {
+            configurable: true,
+            value: true
+        });
+
+        expect(pictureInPictureManager.isSupported()).toBe(false);
+
+        Object.defineProperty(document, 'pictureInPictureEnabled', {
+            configurable: true,
+            value: originalValue
+        });
     });
 });
