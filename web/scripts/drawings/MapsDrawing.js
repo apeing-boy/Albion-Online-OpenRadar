@@ -25,12 +25,16 @@ export class MapDrawing extends DrawingUtils
         const id = curr_map.id.toString();
         const extent = zonesDatabase.getMapAssetExtent(id);
         const center = zonesDatabase.getMapAssetCenter(id);
+        const assetFile = zonesDatabase.getZoneFile(id);
+        const imagePath = assetFile
+            ? `/images/Maps/game/${assetFile}.webp`
+            : `/images/Maps/${id}.webp`;
         const size = extent * scaleFactor;
         const adjX = (curr_map.hX - center.x) * scaleFactor;
         const adjY = (curr_map.hY + center.y) * scaleFactor;
-        this.DrawImageMap(ctx, adjX, adjY, id, size, size);
+        this.DrawImageMap(ctx, adjX, adjY, imagePath, size, size);
     }
-    DrawImageMap(ctx, x, y, imageName, drawWidth, drawHeight)
+    DrawImageMap(ctx, x, y, imagePath, drawWidth, drawHeight)
     {
         // Fill background => if no map image or corner to prevent glitch textures
         ctx.fillStyle = '#1a1c23';
@@ -38,10 +42,10 @@ export class MapDrawing extends DrawingUtils
 
         if (!settingsSync.getBool("settingShowMap", true)) return;
 
-        if (imageName === undefined || imageName == "undefined")
+        if (!imagePath)
             return;
 
-        const src = "/images/Maps/" + imageName + ".webp";
+        const src = imagePath;
 
         const preloadedImage = imageCache.GetPreloadedImage(src, "Maps");
 
