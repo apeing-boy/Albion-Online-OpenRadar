@@ -169,6 +169,15 @@ export class ZonesDatabase {
     return {x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2};
   }
 
+  getZoneBounds(zoneId) {
+    const b = this._validBounds(zoneId);
+    if (!b) return null;
+    return {
+      min: [...b.min],
+      max: [...b.max],
+    };
+  }
+
   _validBounds(zoneId) {
     const b = this.getZone(zoneId)?.bounds;
     if (

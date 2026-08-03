@@ -300,6 +300,27 @@ describe('ZonesDatabase map asset center', () => {
     });
 });
 
+describe('ZonesDatabase zone bounds', () => {
+    test('returns the exact min/max coordinates for a known zone', () => {
+        expect(zonesDatabase.getZoneBounds('5002')).toEqual({
+            min: [-80, -160],
+            max: [90, 10]
+        });
+    });
+
+    test('returns null when bounds are unavailable', () => {
+        expect(zonesDatabase.getZoneBounds('TEST_NO_BOUNDS')).toBeNull();
+        expect(zonesDatabase.getZoneBounds('UNKNOWN_ZONE')).toBeNull();
+    });
+
+    test('returns a copy that cannot mutate the database', () => {
+        const bounds = zonesDatabase.getZoneBounds('5002');
+        bounds.min[0] = 999;
+
+        expect(zonesDatabase.getZoneBounds('5002').min[0]).toBe(-80);
+    });
+});
+
 describe('ZonesDatabase asset extent from real zones.json', () => {
     // @verified 2026-05-14: cluster.xml minimapBoundsMin/Max for 5001 = (-200,-200)..(200,200);
     // width 400, height 400. extent = 400.

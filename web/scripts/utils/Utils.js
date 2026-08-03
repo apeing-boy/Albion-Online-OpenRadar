@@ -243,7 +243,7 @@ export async function initRadar() {
         isInitialized = true;
         window.logger?.info(CATEGORIES.SYSTEM, 'RadarInitialized', {});
 
-        if (pictureInPictureManager.initialize(radarRenderer.canvasManager)) {
+        if (pictureInPictureManager.initialize(radarRenderer.canvasManager, radarRenderer)) {
             window.pipManager = pictureInPictureManager;
             document.dispatchEvent(new CustomEvent('pipManagerReady'));
             window.logger?.info(CATEGORIES.SYSTEM, 'PiPManagerInitialized', {});
