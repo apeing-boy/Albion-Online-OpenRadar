@@ -358,3 +358,50 @@ describe('ZonesDatabase asset extent from real zones.json', () => {
         expect(zonesDatabase.getMapAssetExtent('1000')).toBe(600);
     });
 });
+
+describe('ZonesDatabase generated minimap coordinates', () => {
+    beforeEach(() => {
+        zonesDatabase.mapPixelsPerMeter = 1;
+        zonesDatabase.mapCoordinates = {
+            '4208_WRL_MN_AUTO_T4_UND_ROY': {
+                game_walk: {
+                    size: [830, 830],
+                    zero_px: [415, 414],
+                },
+            },
+            '5000_CTY_MI_AUTO_T1_NON': {
+                game_walk: {
+                    size: [672, 700],
+                    zero_px: [255, 344],
+                },
+            },
+        };
+    });
+
+    test('uses coords.json geometry for Mawar Gorge', () => {
+        expect(zonesDatabase.getMapAssetGeometry('4208')).toEqual({
+            width: 830,
+            height: 830,
+            center: {x: 0, y: 0},
+            source: 'coords',
+        });
+    });
+
+    test('uses independent width, height and true center for a rectangular map', () => {
+        expect(zonesDatabase.getMapAssetGeometry('5000')).toEqual({
+            width: 672,
+            height: 700,
+            center: {x: 81, y: -5},
+            source: 'coords',
+        });
+    });
+
+    test('falls back to zone bounds when generated coordinates are absent', () => {
+        expect(zonesDatabase.getMapAssetGeometry('5002')).toEqual({
+            width: 170,
+            height: 170,
+            center: {x: 5, y: -75},
+            source: 'bounds',
+        });
+    });
+});

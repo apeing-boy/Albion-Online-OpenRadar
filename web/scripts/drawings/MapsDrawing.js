@@ -23,16 +23,17 @@ export class MapDrawing extends DrawingUtils
         const zoom = this.getZoomLevel();
         const scaleFactor = 4 * zoom;
         const id = curr_map.id.toString();
-        const extent = zonesDatabase.getMapAssetExtent(id);
-        const center = zonesDatabase.getMapAssetCenter(id);
+        const geometry = zonesDatabase.getMapAssetGeometry(id);
+        const center = geometry.center;
         const assetFile = zonesDatabase.getZoneFile(id);
         const imagePath = assetFile
             ? `/images/Maps/game/${assetFile}.webp`
             : `/images/Maps/${id}.webp`;
-        const size = extent * scaleFactor;
+        const drawWidth = geometry.width * scaleFactor;
+        const drawHeight = geometry.height * scaleFactor;
         const adjX = (curr_map.hX - center.x) * scaleFactor;
         const adjY = (curr_map.hY + center.y) * scaleFactor;
-        this.DrawImageMap(ctx, adjX, adjY, imagePath, size, size);
+        this.DrawImageMap(ctx, adjX, adjY, imagePath, drawWidth, drawHeight);
     }
     DrawImageMap(ctx, x, y, imagePath, drawWidth, drawHeight)
     {

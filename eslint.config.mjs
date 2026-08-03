@@ -110,7 +110,7 @@ export default [
 
     // Node.js tools/scripts (JS)
     {
-        files: ["tools/**/*.js"],
+        files: ["tools/**/*.js", "tools/**/*.mjs"],
         languageOptions: {
             ecmaVersion: 2022,
             sourceType: "module",

@@ -3,6 +3,8 @@ import { CATEGORIES } from "../constants/LoggerConstants.js";
 export class ZonesDatabase {
   constructor() {
     this.zones = {};
+    this.mapCoordinates = {};
+    this.mapPixelsPerMeter = 1;
     this.overrides = new Map();
     this.loaded = false;
     this.stats = {
@@ -15,7 +17,10 @@ export class ZonesDatabase {
     };
   }
 
-  async load(jsonPath = "/ao-bin-dumps/zones.json") {
+  async load(
+    jsonPath = "/ao-bin-dumps/zones.json",
+    mapCoordinatesPath = "/images/Maps/coords.json",
+  ) {
     const startTime = performance.now();
 
     try {
@@ -29,6 +34,7 @@ export class ZonesDatabase {
       }
 
       this.zones = await response.json();
+      await this._loadMapCoordinates(mapCoordinatesPath);
       this.loaded = true;
 
       // Calculate stats
@@ -57,6 +63,34 @@ export class ZonesDatabase {
         path: jsonPath,
       });
       throw error;
+    }
+  }
+
+  async _loadMapCoordinates(jsonPath) {
+    try {
+      const response = await fetch(jsonPath, {cache: 'no-cache'});
+      if (!response.ok) {
+        throw new Error(`Failed to fetch coords.json: ${response.status}`);
+      }
+
+      const document = await response.json();
+      const clusters = document?.clusters;
+      if (!clusters || typeof clusters !== "object" || Array.isArray(clusters)) {
+        throw new Error("coords.json does not contain a valid clusters object");
+      }
+
+      this.mapCoordinates = clusters;
+      const pixelsPerMeter = Number(document?.readme?.px_per_meter);
+      this.mapPixelsPerMeter = Number.isFinite(pixelsPerMeter) && pixelsPerMeter > 0
+        ? pixelsPerMeter
+        : 1;
+    } catch (error) {
+      this.mapCoordinates = {};
+      this.mapPixelsPerMeter = 1;
+      window.logger?.warn(CATEGORIES.MAP, "MapCoordinatesLoadError", {
+        error: error.message,
+        path: jsonPath,
+      });
     }
   }
 
@@ -158,15 +192,52 @@ export class ZonesDatabase {
   }
 
   getMapAssetExtent(zoneId) {
-    const b = this._validBounds(zoneId);
-    if (!b) return 825;
-    return Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]);
+    const geometry = this.getMapAssetGeometry(zoneId);
+    return Math.max(geometry.width, geometry.height);
   }
 
   getMapAssetCenter(zoneId) {
+    return this.getMapAssetGeometry(zoneId).center;
+  }
+
+  getMapAssetGeometry(zoneId) {
+    const coordinates = this._validMapCoordinates(zoneId);
+    if (coordinates) {
+      const [pixelWidth, pixelHeight] = coordinates.size;
+      const pixelsPerMeter = coordinates.pixelsPerMeter;
+      const width = pixelWidth / pixelsPerMeter;
+      const height = pixelHeight / pixelsPerMeter;
+
+      return {
+        width,
+        height,
+        center: {
+          x: (pixelWidth / 2 - coordinates.addToX) / pixelsPerMeter,
+          y: (coordinates.subZFrom + 1 - pixelHeight / 2) / pixelsPerMeter,
+        },
+        source: "coords",
+      };
+    }
+
     const b = this._validBounds(zoneId);
-    if (!b) return {x: 0, y: 0};
-    return {x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2};
+    if (b) {
+      return {
+        width: b.max[0] - b.min[0],
+        height: b.max[1] - b.min[1],
+        center: {
+          x: (b.min[0] + b.max[0]) / 2,
+          y: (b.min[1] + b.max[1]) / 2,
+        },
+        source: "bounds",
+      };
+    }
+
+    return {
+      width: 825,
+      height: 825,
+      center: {x: 0, y: 0},
+      source: "fallback",
+    };
   }
 
   getZoneBounds(zoneId) {
@@ -190,6 +261,36 @@ export class ZonesDatabase {
       return null;
     }
     return b;
+  }
+
+  _validMapCoordinates(zoneId) {
+    const file = this.getZoneFile(zoneId);
+    if (!file) return null;
+
+    const entry = this.mapCoordinates[file];
+    const coordinates = entry?.game_walk ?? entry?.full;
+    if (!coordinates) return null;
+
+    const size = coordinates.size;
+    const zeroPixel = coordinates.zero_px;
+    if (
+      !Array.isArray(size) || size.length !== 2 ||
+      !size.every((value) => Number.isFinite(value) && value > 0) ||
+      !Array.isArray(zeroPixel) || zeroPixel.length !== 2 ||
+      !zeroPixel.every(Number.isFinite)
+    ) {
+      return null;
+    }
+
+    const pixelsPerMeter = Number(coordinates.px_per_meter ?? this.mapPixelsPerMeter);
+    return {
+      size,
+      addToX: zeroPixel[0],
+      subZFrom: zeroPixel[1],
+      pixelsPerMeter: Number.isFinite(pixelsPerMeter) && pixelsPerMeter > 0
+        ? pixelsPerMeter
+        : 1,
+    };
   }
 }
 

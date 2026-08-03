@@ -304,6 +304,21 @@ make all-in-one       # Both binaries + READMEs + checksums
 make release-dry-run  # Same plus a generated RELEASE.md for review
 ```
 
+### Sync Generated Minimap Assets
+
+The minimap renderer output can be merged without renaming cluster files or deleting
+unrelated assets. The source directory must contain `game/*.webp` and `coords.json`:
+
+```powershell
+npm run sync:minimaps -- "D:\Other\AssetRipper\Albion\maps\out\minimaps"
+```
+
+The command validates that every image has a matching coordinates entry, then updates
+`web/images/Maps/game` and `web/images/Maps/coords.json`. Add `--dry-run` to validate and
+preview the number of changed files without writing them. The frontend uses each zone's
+cluster filename from `zones.json`; `coords.json` supplies the exact image width, height,
+and world-coordinate origin.
+
 ### Project Structure
 
 ```

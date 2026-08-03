@@ -15,6 +15,7 @@
     "download-icons": "tsx tools/download-and-optimize-item-icons.ts",
     "download-spells": "tsx tools/download-and-optimize-spell-icons.ts",
     "download-map": "tsx tools/download-and-optimize-map.ts",
+    "sync:minimaps": "node tools/sync-generated-minimaps.mjs",
     "download-assets": "npm run download-icons && npm run download-spells && npm run download-map",
     "update-assets": "npm run update-data && npm run download-assets",
     "compress:data": "tsx tools/compress-game-data.ts",

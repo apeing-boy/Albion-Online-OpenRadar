@@ -39,8 +39,15 @@ describe('game data is fetched with a revalidating cache mode', () => {
         await create().load(path).catch(() => {
         });
 
-        expect(calls).toHaveLength(1);
+        const expectedCallCount = _name === 'ZonesDatabase' ? 2 : 1;
+        expect(calls).toHaveLength(expectedCallCount);
         expect(calls[0].url).toBe(path);
         expect(calls[0].init).toEqual({cache: 'no-cache'});
+        if (_name === 'ZonesDatabase') {
+            expect(calls[1]).toEqual({
+                url: '/images/Maps/coords.json',
+                init: {cache: 'no-cache'},
+            });
+        }
     });
 });

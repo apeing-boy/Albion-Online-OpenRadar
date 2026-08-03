@@ -21,8 +21,11 @@ vi.mock('../utils/ImageCache.js', () => ({
 
 vi.mock('../data/ZonesDatabase.js', () => ({
     default: {
-        getMapAssetExtent: vi.fn(() => 825),
-        getMapAssetCenter: vi.fn(() => ({x: 0, y: 0})),
+        getMapAssetGeometry: vi.fn(() => ({
+            width: 825,
+            height: 825,
+            center: {x: 0, y: 0},
+        })),
         getZoneFile: vi.fn(() => '0212_WRL_MN_AUTO_T4_UND_ROY'),
     },
 }));
@@ -51,7 +54,7 @@ function lastTranslate(ctx) {
     return calls[calls.length - 1];
 }
 
-describe('MapsDrawing per-zone asset extent', () => {
+describe('MapsDrawing per-zone asset geometry', () => {
     let drawing;
     let ctx;
 
@@ -66,7 +69,9 @@ describe('MapsDrawing per-zone asset extent', () => {
     // @verified 2026-05-13: synthetic. Default 825 extent matches the legacy baseline confirmed
     // to center almost every cluster correctly.
     test('default extent draws image as 825 * sf square with legacy translate', () => {
-        zonesDatabase.getMapAssetExtent.mockReturnValueOnce(825);
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 825, height: 825, center: {x: 0, y: 0},
+        });
         const map = {id: '0212', hX: 0, hY: 0};
 
         drawing.draw(ctx, map);
@@ -81,8 +86,9 @@ describe('MapsDrawing per-zone asset extent', () => {
 
     // @verified 2026-05-14: synthetic. Symmetric bounds (center 0, 0), player at origin.
     test('symmetric center, player at origin: no translate', () => {
-        zonesDatabase.getMapAssetExtent.mockReturnValueOnce(400);
-        zonesDatabase.getMapAssetCenter.mockReturnValueOnce({x: 0, y: 0});
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 400, height: 400, center: {x: 0, y: 0},
+        });
         const map = {id: '5001', hX: 0, hY: 0};
 
         drawing.draw(ctx, map);
@@ -123,8 +129,9 @@ describe('MapsDrawing per-zone asset extent', () => {
     // adjX = (0 - 5) * 4 = -20, ctx.translate(-adjX, adjY) -> tr[0] = +20.
     // adjY = (0 + (-75)) * 4 = -300 -> tr[1] = -300.
     test('asymmetric center applies offset on translate at origin', () => {
-        zonesDatabase.getMapAssetExtent.mockReturnValueOnce(170);
-        zonesDatabase.getMapAssetCenter.mockReturnValueOnce({x: 5, y: -75});
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 170, height: 170, center: {x: 5, y: -75},
+        });
         const map = {id: '5002', hX: 0, hY: 0};
 
         drawing.draw(ctx, map);
@@ -141,8 +148,9 @@ describe('MapsDrawing per-zone asset extent', () => {
     // 5002 center (5, -75). adjX = (6.15 - 5) * 4 = 4.6, adjY = (72.08 + (-75)) * 4 = -11.68.
     // tr[0] = -4.6, tr[1] = -11.68.
     test('player at bounds midpoint cancels offset', () => {
-        zonesDatabase.getMapAssetExtent.mockReturnValueOnce(170);
-        zonesDatabase.getMapAssetCenter.mockReturnValueOnce({x: 5, y: -75});
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 170, height: 170, center: {x: 5, y: -75},
+        });
         const map = {id: '5002', hX: 6.15, hY: 72.08};
 
         drawing.draw(ctx, map);
@@ -154,8 +162,9 @@ describe('MapsDrawing per-zone asset extent', () => {
 
     // @verified 2026-05-14: synthetic. Symmetric center (0, 0) reduces to legacy translate.
     test('symmetric center uses legacy translate(-hX*sf, hY*sf)', () => {
-        zonesDatabase.getMapAssetExtent.mockReturnValueOnce(170);
-        zonesDatabase.getMapAssetCenter.mockReturnValueOnce({x: 0, y: 0});
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 170, height: 170, center: {x: 0, y: 0},
+        });
         const map = {id: '5002', hX: 50, hY: -30};
 
         drawing.draw(ctx, map);
@@ -168,8 +177,9 @@ describe('MapsDrawing per-zone asset extent', () => {
     // @verified 2026-05-14: synthetic. Zoom multiplier scales size and offset uniformly.
     // adjX = (10 - 5) * 8 = 40, adjY = (-5 + (-75)) * 8 = -640.
     test('zoom multiplier scales size and offset uniformly', () => {
-        zonesDatabase.getMapAssetExtent.mockReturnValueOnce(170);
-        zonesDatabase.getMapAssetCenter.mockReturnValueOnce({x: 5, y: -75});
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 170, height: 170, center: {x: 5, y: -75},
+        });
         drawing.getZoomLevel.mockReturnValue(2.0);
         const map = {id: '5002', hX: 10, hY: -5};
 
@@ -181,6 +191,22 @@ describe('MapsDrawing per-zone asset extent', () => {
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(-40, 6);
         expect(tr[1]).toBeCloseTo(-640, 6);
+    });
+
+    test('keeps a rectangular generated map rectangular', () => {
+        zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
+            width: 672, height: 700, center: {x: 81, y: -5},
+        });
+        const map = {id: '5000', hX: 81, hY: 5};
+
+        drawing.draw(ctx, map);
+
+        const drawCall = ctx.drawImage.mock.calls[0];
+        expect(drawCall[3]).toBeCloseTo(672 * 4, 6);
+        expect(drawCall[4]).toBeCloseTo(700 * 4, 6);
+        const tr = lastTranslate(ctx);
+        expect(tr[0]).toBeCloseTo(0, 6);
+        expect(tr[1]).toBeCloseTo(0, 6);
     });
 
     // @verified 2026-05-13: synthetic. Negative id is the "no map" sentinel from MapH(-1) at boot.
