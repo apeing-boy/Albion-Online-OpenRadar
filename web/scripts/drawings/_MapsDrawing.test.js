@@ -82,6 +82,9 @@ describe('MapsDrawing per-zone asset geometry', () => {
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(0, 6);
         expect(tr[1]).toBeCloseTo(0, 6);
+        expect(ctx.scale).not.toHaveBeenCalled();
+        expect(ctx.rotate).toHaveBeenCalledWith(Math.PI / 4);
+        expect(ctx.translate.mock.calls[0]).toEqual([250, 250]);
     });
 
     // @verified 2026-05-14: synthetic. Symmetric bounds (center 0, 0), player at origin.
@@ -126,8 +129,8 @@ describe('MapsDrawing per-zone asset geometry', () => {
     });
 
     // @verified 2026-05-14: synthetic. 5002 Bank: extent 170, center (5, -75). Player at origin.
-    // adjX = (0 - 5) * 4 = -20, ctx.translate(-adjX, adjY) -> tr[0] = +20.
-    // adjY = (0 + (-75)) * 4 = -300 -> tr[1] = -300.
+    // adjX = (0 - 5) * 4 = -20, ctx.translate(-adjX, -adjY) -> tr[0] = +20.
+    // adjY = (0 + (-75)) * 4 = -300 -> tr[1] = +300.
     test('asymmetric center applies offset on translate at origin', () => {
         zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
             width: 170, height: 170, center: {x: 5, y: -75},
@@ -141,12 +144,12 @@ describe('MapsDrawing per-zone asset geometry', () => {
         expect(drawCall[4]).toBeCloseTo(170 * 4, 6);
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(20, 6);
-        expect(tr[1]).toBeCloseTo(-300, 6);
+        expect(tr[1]).toBeCloseTo(300, 6);
     });
 
     // @verified 2026-05-14: synthetic. Player at lpX=6.15, lpY=-72.08 (so hX=6.15, hY=72.08).
     // 5002 center (5, -75). adjX = (6.15 - 5) * 4 = 4.6, adjY = (72.08 + (-75)) * 4 = -11.68.
-    // tr[0] = -4.6, tr[1] = -11.68.
+    // tr[0] = -4.6, tr[1] = +11.68.
     test('player at bounds midpoint cancels offset', () => {
         zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
             width: 170, height: 170, center: {x: 5, y: -75},
@@ -157,11 +160,11 @@ describe('MapsDrawing per-zone asset geometry', () => {
 
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(-4.6, 6);
-        expect(tr[1]).toBeCloseTo(-11.68, 6);
+        expect(tr[1]).toBeCloseTo(11.68, 6);
     });
 
     // @verified 2026-05-14: synthetic. Symmetric center (0, 0) reduces to legacy translate.
-    test('symmetric center uses legacy translate(-hX*sf, hY*sf)', () => {
+    test('symmetric center translates opposite to the player image offset', () => {
         zonesDatabase.getMapAssetGeometry.mockReturnValueOnce({
             width: 170, height: 170, center: {x: 0, y: 0},
         });
@@ -171,7 +174,7 @@ describe('MapsDrawing per-zone asset geometry', () => {
 
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(-50 * 4, 6);
-        expect(tr[1]).toBeCloseTo(-30 * 4, 6);
+        expect(tr[1]).toBeCloseTo(30 * 4, 6);
     });
 
     // @verified 2026-05-14: synthetic. Zoom multiplier scales size and offset uniformly.
@@ -190,7 +193,7 @@ describe('MapsDrawing per-zone asset geometry', () => {
         expect(drawCall[4]).toBeCloseTo(170 * 8, 6);
         const tr = lastTranslate(ctx);
         expect(tr[0]).toBeCloseTo(-40, 6);
-        expect(tr[1]).toBeCloseTo(-640, 6);
+        expect(tr[1]).toBeCloseTo(640, 6);
     });
 
     test('keeps a rectangular generated map rectangular', () => {

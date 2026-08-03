@@ -56,12 +56,14 @@ export class MapDrawing extends DrawingUtils
         {
             ctx.save();
 
-            ctx.scale(1, -1);
             const center = this.getCanvasCenter();
-            ctx.translate(center, -center);
+            ctx.translate(center, center);
 
-            ctx.rotate(-0.785398);
-            ctx.translate(-x, y);
+            // Generated minimaps already use screen-oriented rows:
+            // X grows right and Z grows up (image rows grow toward -Z).
+            // Rotate clockwise into Albion's diamond view without reflecting the image.
+            ctx.rotate(Math.PI / 4);
+            ctx.translate(-x, -y);
 
             ctx.drawImage(preloadedImage, -drawWidth/2, -drawHeight/2, drawWidth, drawHeight);
             ctx.restore();

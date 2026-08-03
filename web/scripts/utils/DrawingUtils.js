@@ -145,9 +145,11 @@ export class DrawingUtils {
     }
 
     transformPoint(x, y) {
-        const angle = -0.785398;
-        let newX = x * angle - y * angle;
-        let newY = x * angle + y * angle;
+        // hX is playerX - entityX and hY is entityZ - playerZ.
+        // Rotate the corresponding map vector clockwise by exactly 45 degrees.
+        const sinCos45 = Math.SQRT1_2;
+        let newX = (y - x) * sinCos45;
+        let newY = -(x + y) * sinCos45;
         const zoom = BASE_ZOOM * this.getZoomLevel();
         newX *= zoom;
         newY *= zoom;

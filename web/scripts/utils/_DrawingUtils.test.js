@@ -22,6 +22,40 @@ const {DrawingUtils} = await import('./DrawingUtils.js');
 const settingsSync = (await import('./SettingsSync.js')).default;
 const imageCache = (await import('./ImageCache.js')).default;
 
+describe('DrawingUtils map coordinate transform', () => {
+    let utils;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        utils = new DrawingUtils();
+        utils.getZoomLevel = vi.fn(() => 1.0);
+        utils.getCanvasCenter = vi.fn(() => 250);
+    });
+
+    test('rotates an entity east of the player clockwise by 45 degrees', () => {
+        // Entity delta is (+10, 0), represented by hX=-10 and hY=0.
+        const point = utils.transformPoint(-10, 0);
+
+        expect(point.x).toBeCloseTo(250 + 40 * Math.SQRT1_2, 6);
+        expect(point.y).toBeCloseTo(250 + 40 * Math.SQRT1_2, 6);
+    });
+
+    test('rotates an entity north of the player clockwise by 45 degrees', () => {
+        // Entity delta is (0, +10), represented by hX=0 and hY=10.
+        const point = utils.transformPoint(0, 10);
+
+        expect(point.x).toBeCloseTo(250 + 40 * Math.SQRT1_2, 6);
+        expect(point.y).toBeCloseTo(250 - 40 * Math.SQRT1_2, 6);
+    });
+
+    test('preserves distance while applying the map zoom', () => {
+        const point = utils.transformPoint(-6, 8);
+        const distance = Math.hypot(point.x - 250, point.y - 250);
+
+        expect(distance).toBeCloseTo(10 * 4, 6);
+    });
+});
+
 describe('DrawingUtils marker scaling helpers', () => {
     let utils;
 
@@ -308,4 +342,3 @@ describe('DrawingUtils.drawResourceBadge', () => {
         expect(ctx.fillRect).toHaveBeenCalledWith(70, 70, 60, 60);
     });
 });
-
