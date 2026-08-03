@@ -1,5 +1,6 @@
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import pictureInPictureManager from './PictureInPictureManager.js';
+import zonesDatabase from '../data/ZonesDatabase.js';
 
 describe('PictureInPictureManager native window controls', () => {
     beforeEach(() => {
@@ -25,6 +26,7 @@ describe('PictureInPictureManager native window controls', () => {
         pictureInPictureManager.overlayVideo = null;
         pictureInPictureManager.overlayCloseTimer = null;
         pictureInPictureManager.windowControlSupported = false;
+        pictureInPictureManager.radarRenderer = null;
         delete window.settingsSync;
         vi.restoreAllMocks();
     });
@@ -101,5 +103,30 @@ describe('PictureInPictureManager native window controls', () => {
 
         expect(await applyPromise).toBe(false);
         expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('reads current player coordinates and location bounds from the renderer', () => {
+        pictureInPictureManager.radarRenderer = {
+            map: {id: 'test-zone'},
+            lpX: 123.456,
+            lpY: -78.9
+        };
+        const boundsSpy = vi.spyOn(zonesDatabase, 'getZoneBounds').mockReturnValue({
+            min: [-415, -305],
+            max: [415, 295]
+        });
+
+        expect(pictureInPictureManager.getCoordinateInfo()).toEqual({
+            bounds: {min: [-415, -305], max: [415, 295]},
+            x: 123.456,
+            y: -78.9
+        });
+        expect(boundsSpy).toHaveBeenCalledWith('test-zone');
+    });
+
+    test('adds a compact information bar below the square radar frame', () => {
+        expect(pictureInPictureManager.getInfoBarHeight(300)).toBe(38);
+        expect(pictureInPictureManager.getInfoBarHeight(500)).toBe(50);
+        expect(pictureInPictureManager.getInfoBarHeight(800)).toBe(56);
     });
 });

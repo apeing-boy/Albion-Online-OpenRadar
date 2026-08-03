@@ -1,4 +1,9 @@
 import {CATEGORIES} from '../constants/LoggerConstants.js';
+import zonesDatabase from '../data/ZonesDatabase.js';
+
+const INFO_BAR_HEIGHT_RATIO = 0.1;
+const INFO_BAR_MIN_HEIGHT = 38;
+const INFO_BAR_MAX_HEIGHT = 56;
 
 class PictureInPictureManager {
     constructor() {
@@ -13,6 +18,7 @@ class PictureInPictureManager {
         this.stream = null;
         this.isActive = false;
         this.canvasManager = null;
+        this.radarRenderer = null;
         this.size = 500;
         this.windowControlSupported = false;
         this.lifecycleGeneration = 0;
@@ -20,8 +26,9 @@ class PictureInPictureManager {
         this._onLeavePip = null;
     }
 
-    initialize(canvasManager) {
+    initialize(canvasManager, radarRenderer = null) {
         this.canvasManager = canvasManager;
+        this.radarRenderer = radarRenderer;
 
         const canvases = canvasManager.canvases || canvasManager.getAllCanvases();
         const firstCanvas = canvases.mapCanvas || canvases.drawCanvas;
@@ -57,7 +64,7 @@ class PictureInPictureManager {
     createPipCanvas() {
         this.pipCanvas = document.createElement('canvas');
         this.pipCanvas.width = this.size;
-        this.pipCanvas.height = this.size;
+        this.pipCanvas.height = this.size + this.getInfoBarHeight(this.size);
         this.pipCtx = this.pipCanvas.getContext('2d');
         this.pipCtx.imageSmoothingEnabled = true;
         this.pipCtx.imageSmoothingQuality = 'high';
@@ -80,7 +87,7 @@ class PictureInPictureManager {
             this.size = newSize;
             if (this.pipCanvas) {
                 this.pipCanvas.width = newSize;
-                this.pipCanvas.height = newSize;
+                this.pipCanvas.height = newSize + this.getInfoBarHeight(newSize);
             }
         };
         document.addEventListener('canvasSizeChanged', this._onCanvasSizeChanged);
@@ -119,7 +126,7 @@ class PictureInPictureManager {
         const overlay = window.open(
             '',
             'openradar-overlay',
-            `popup=yes,width=${this.size},height=${this.size},left=40,top=40`
+            `popup=yes,width=${this.size},height=${this.size + this.getInfoBarHeight(this.size)},left=40,top=40`
         );
         if (!overlay) {
             window.logger?.error(CATEGORIES.SYSTEM, 'Overlay_StartFailed', {reason: 'popup-blocked'});
@@ -400,18 +407,74 @@ class PictureInPictureManager {
         const {mapCanvas, drawCanvas, ourPlayerCanvas, uiCanvas} = canvases;
 
         const sourceSize = mapCanvas?.width || this.size;
-        if (this.pipCanvas.width !== sourceSize) {
+        const infoBarHeight = this.getInfoBarHeight(sourceSize);
+        if (this.pipCanvas.width !== sourceSize || this.pipCanvas.height !== sourceSize + infoBarHeight) {
             this.pipCanvas.width = sourceSize;
-            this.pipCanvas.height = sourceSize;
+            this.pipCanvas.height = sourceSize + infoBarHeight;
             this.size = sourceSize;
         }
 
-        this.pipCtx.clearRect(0, 0, this.size, this.size);
+        this.pipCtx.clearRect(0, 0, this.pipCanvas.width, this.pipCanvas.height);
 
         if (mapCanvas) this.pipCtx.drawImage(mapCanvas, 0, 0);
         if (drawCanvas) this.pipCtx.drawImage(drawCanvas, 0, 0);
         if (ourPlayerCanvas) this.pipCtx.drawImage(ourPlayerCanvas, 0, 0);
         if (uiCanvas) this.pipCtx.drawImage(uiCanvas, 0, 0);
+        this.drawCoordinateBar(sourceSize, infoBarHeight);
+    }
+
+    getInfoBarHeight(sourceSize) {
+        return Math.max(
+            INFO_BAR_MIN_HEIGHT,
+            Math.min(INFO_BAR_MAX_HEIGHT, Math.round(sourceSize * INFO_BAR_HEIGHT_RATIO))
+        );
+    }
+
+    getCoordinateInfo() {
+        const mapId = this.radarRenderer?.map?.id ?? window.currentMapId;
+        const x = this.radarRenderer?.lpX ?? window.lpX;
+        const y = this.radarRenderer?.lpY ?? window.lpY;
+        return {
+            bounds: zonesDatabase.getZoneBounds(mapId),
+            x: Number.isFinite(x) ? x : null,
+            y: Number.isFinite(y) ? y : null
+        };
+    }
+
+    formatCoordinate(value, decimals = 0) {
+        if (!Number.isFinite(value)) return '\u2014';
+        return value.toFixed(decimals);
+    }
+
+    drawCoordinateBar(sourceSize, height) {
+        const ctx = this.pipCtx;
+        const top = sourceSize;
+        const {bounds, x, y} = this.getCoordinateInfo();
+        const minX = this.formatCoordinate(bounds?.min?.[0]);
+        const maxX = this.formatCoordinate(bounds?.max?.[0]);
+        const minY = this.formatCoordinate(bounds?.min?.[1]);
+        const maxY = this.formatCoordinate(bounds?.max?.[1]);
+        const playerX = this.formatCoordinate(x, 1);
+        const playerY = this.formatCoordinate(y, 1);
+
+        const scale = Math.max(0.72, Math.min(1, sourceSize / 500));
+        const fontSize = Math.max(9, Math.round(12 * scale));
+        const firstLineY = top + Math.round(height * 0.32);
+        const secondLineY = top + Math.round(height * 0.72);
+
+        ctx.save();
+        ctx.fillStyle = '#0b1220';
+        ctx.fillRect(0, top, sourceSize, height);
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(0, top, sourceSize, 1);
+        ctx.font = `600 ${fontSize}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(`LOCATION   X ${minX}\u2026${maxX}   Y ${minY}\u2026${maxY}`, sourceSize / 2, firstLineY);
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(`PLAYER     X ${playerX}   Y ${playerY}`, sourceSize / 2, secondLineY);
+        ctx.restore();
     }
 
     dispatchStatusEvent(status) {
@@ -455,6 +518,7 @@ class PictureInPictureManager {
         this.pipCanvas = null;
         this.pipCtx = null;
         this.canvasManager = null;
+        this.radarRenderer = null;
         this.windowControlSupported = false;
     }
 
