@@ -7,15 +7,12 @@ const INFO_BAR_MAX_HEIGHT = 56;
 
 class PictureInPictureManager {
     constructor() {
-        this.pipCanvas = null;
-        this.pipCtx = null;
-        this.videoElement = null;
         this.overlayWindow = null;
-        this.overlayVideo = null;
+        this.overlayCanvas = null;
+        this.overlayCtx = null;
         this.overlayCloseTimer = null;
         this.mode = null;
         this.closingOverlay = false;
-        this.stream = null;
         this.isActive = false;
         this.canvasManager = null;
         this.radarRenderer = null;
@@ -23,7 +20,6 @@ class PictureInPictureManager {
         this.windowControlSupported = false;
         this.lifecycleGeneration = 0;
         this._onCanvasSizeChanged = null;
-        this._onLeavePip = null;
     }
 
     initialize(canvasManager, radarRenderer = null) {
@@ -34,8 +30,6 @@ class PictureInPictureManager {
         const firstCanvas = canvases.mapCanvas || canvases.drawCanvas;
         this.size = firstCanvas?.width || 500;
 
-        this.createPipCanvas();
-        this.createVideoElement();
         this.setupEventListeners();
         void this.detectWindowControlSupport();
 
@@ -61,33 +55,13 @@ class PictureInPictureManager {
         }));
     }
 
-    createPipCanvas() {
-        this.pipCanvas = document.createElement('canvas');
-        this.pipCanvas.width = this.size;
-        this.pipCanvas.height = this.size + this.getInfoBarHeight(this.size);
-        this.pipCtx = this.pipCanvas.getContext('2d');
-        this.pipCtx.imageSmoothingEnabled = true;
-        this.pipCtx.imageSmoothingQuality = 'high';
-    }
-
-    createVideoElement() {
-        this.videoElement = document.createElement('video');
-        this.videoElement.muted = true;
-        this.videoElement.playsInline = true;
-        this.videoElement.style.cssText = 'position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;';
-        document.body.appendChild(this.videoElement);
-
-        this._onLeavePip = () => this.onPipClosed();
-        this.videoElement.addEventListener('leavepictureinpicture', this._onLeavePip);
-    }
-
     setupEventListeners() {
         this._onCanvasSizeChanged = (e) => {
             const newSize = e.detail?.size || 500;
             this.size = newSize;
-            if (this.pipCanvas) {
-                this.pipCanvas.width = newSize;
-                this.pipCanvas.height = newSize + this.getInfoBarHeight(newSize);
+            if (this.overlayCanvas) {
+                this.resizeOverlayCanvas(newSize);
+                this.compositeFrame();
             }
         };
         document.addEventListener('canvasSizeChanged', this._onCanvasSizeChanged);
@@ -108,16 +82,12 @@ class PictureInPictureManager {
             return false;
         }
 
-        if (!this.windowControlSupported && !document.pictureInPictureEnabled) {
-            window.logger?.error(CATEGORIES.SYSTEM, 'PiP_NotSupported', {});
+        if (!this.windowControlSupported) {
+            window.logger?.error(CATEGORIES.SYSTEM, 'Overlay_NotSupported', {});
             return false;
         }
 
-        if (this.windowControlSupported) {
-            return this.startOverlayWindow();
-        }
-
-        return this.startBrowserPictureInPicture();
+        return this.startOverlayWindow();
     }
 
     async startOverlayWindow() {
@@ -135,15 +105,11 @@ class PictureInPictureManager {
 
         try {
             this.lifecycleGeneration++;
-            this.compositeFrame();
-            this.stream = this.pipCanvas.captureStream(30);
             this.overlayWindow = overlay;
             this.createOverlayDocument(overlay);
-            this.overlayVideo.srcObject = this.stream;
-            await this.overlayVideo.play();
-
             this.mode = 'overlay';
             this.isActive = true;
+            this.compositeFrame();
             this.watchOverlayClosed();
             this.dispatchStatusEvent('started');
             void this.applyWindowSettings({retry: true});
@@ -152,7 +118,8 @@ class PictureInPictureManager {
         } catch (error) {
             overlay.close();
             this.overlayWindow = null;
-            this.overlayVideo = null;
+            this.overlayCanvas = null;
+            this.overlayCtx = null;
             this.cleanup();
             window.logger?.error(CATEGORIES.SYSTEM, 'Overlay_StartFailed', {error: error.message});
             return false;
@@ -166,27 +133,33 @@ class PictureInPictureManager {
         doc.body.style.cssText = 'width:100%;height:100%;margin:0;background:#000;overflow:hidden;';
         doc.body.replaceChildren();
 
-        const video = doc.createElement('video');
-        video.muted = true;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.style.cssText = [
+        const canvas = doc.createElement('canvas');
+        canvas.style.cssText = [
             'display:block',
             'width:100vw',
             'height:100vh',
-            'object-fit:contain',
             'background:#000',
             'pointer-events:none',
             'user-select:none'
         ].join(';');
-        doc.body.appendChild(video);
-        this.overlayVideo = video;
+        doc.body.appendChild(canvas);
+        this.overlayCanvas = canvas;
+        this.overlayCtx = canvas.getContext('2d');
+        this.overlayCtx.imageSmoothingEnabled = true;
+        this.overlayCtx.imageSmoothingQuality = 'high';
+        this.resizeOverlayCanvas(this.size);
 
         overlay.addEventListener('beforeunload', () => {
             if (!this.closingOverlay) {
                 this.onOverlayClosed();
             }
         }, {once: true});
+    }
+
+    resizeOverlayCanvas(size) {
+        if (!this.overlayCanvas) return;
+        this.overlayCanvas.width = size;
+        this.overlayCanvas.height = size + this.getInfoBarHeight(size);
     }
 
     watchOverlayClosed() {
@@ -210,49 +183,11 @@ class PictureInPictureManager {
         this.dispatchStatusEvent('stopped');
     }
 
-    async startBrowserPictureInPicture() {
-        try {
-            this.lifecycleGeneration++;
-            this.compositeFrame();
-            this.stream = this.pipCanvas.captureStream(30);
-            this.videoElement.srcObject = this.stream;
-
-            await new Promise((resolve, reject) => {
-                const onCanPlay = () => {
-                    this.videoElement.removeEventListener('canplay', onCanPlay);
-                    this.videoElement.removeEventListener('error', onError);
-                    resolve();
-                };
-                const onError = (e) => {
-                    this.videoElement.removeEventListener('canplay', onCanPlay);
-                    this.videoElement.removeEventListener('error', onError);
-                    reject(e);
-                };
-                this.videoElement.addEventListener('canplay', onCanPlay);
-                this.videoElement.addEventListener('error', onError);
-                setTimeout(resolve, 100);
-            });
-
-            await this.videoElement.play();
-            await this.videoElement.requestPictureInPicture();
-
-            this.mode = 'pip';
-            this.isActive = true;
-            this.dispatchStatusEvent('started');
-            void this.applyWindowSettings({retry: true});
-
-            return true;
-        } catch (error) {
-            window.logger?.error(CATEGORIES.SYSTEM, 'PiP_StartFailed', {error: error.message});
-            return false;
-        }
-    }
-
     async stop() {
         this.lifecycleGeneration++;
         await this.releaseWindowControls();
 
-        if (this.mode === 'overlay') {
+        if (this.overlayWindow) {
             this.closingOverlay = true;
             try {
                 this.overlayWindow?.close();
@@ -263,23 +198,7 @@ class PictureInPictureManager {
             this.dispatchStatusEvent('stopped');
             return;
         }
-
-        try {
-            if (document.pictureInPictureElement) {
-                await document.exitPictureInPicture();
-            }
-        } catch (error) {
-            window.logger?.error(CATEGORIES.SYSTEM, 'PiP_ExitFailed', {error: error.message});
-        }
-
         this.cleanup();
-    }
-
-    onPipClosed() {
-        this.lifecycleGeneration++;
-        void this.releaseWindowControls();
-        this.cleanup();
-        this.dispatchStatusEvent('stopped');
     }
 
     cleanup() {
@@ -288,19 +207,9 @@ class PictureInPictureManager {
             this.overlayCloseTimer = null;
         }
         this.overlayWindow = null;
-        this.overlayVideo = null;
+        this.overlayCanvas = null;
+        this.overlayCtx = null;
         this.mode = null;
-
-        if (this.videoElement) {
-            this.videoElement.pause();
-            this.videoElement.srcObject = null;
-        }
-
-        if (this.stream) {
-            this.stream.getTracks().forEach(track => track.stop());
-            this.stream = null;
-        }
-
         this.isActive = false;
     }
 
@@ -401,26 +310,26 @@ class PictureInPictureManager {
     }
 
     compositeFrame() {
-        if (!this.pipCtx || !this.canvasManager) return;
+        if (!this.overlayCtx || !this.overlayCanvas || !this.canvasManager) return;
 
         const canvases = this.canvasManager.canvases || this.canvasManager.getAllCanvases();
         const {mapCanvas, drawCanvas, ourPlayerCanvas, uiCanvas} = canvases;
 
         const sourceSize = mapCanvas?.width || this.size;
         const infoBarHeight = this.getInfoBarHeight(sourceSize);
-        if (this.pipCanvas.width !== sourceSize || this.pipCanvas.height !== sourceSize + infoBarHeight) {
-            this.pipCanvas.width = sourceSize;
-            this.pipCanvas.height = sourceSize + infoBarHeight;
+        if (this.overlayCanvas.width !== sourceSize || this.overlayCanvas.height !== sourceSize + infoBarHeight) {
+            this.resizeOverlayCanvas(sourceSize);
             this.size = sourceSize;
         }
 
-        this.pipCtx.clearRect(0, 0, this.pipCanvas.width, this.pipCanvas.height);
+        const ctx = this.overlayCtx;
+        ctx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
 
-        if (mapCanvas) this.pipCtx.drawImage(mapCanvas, 0, 0);
-        if (drawCanvas) this.pipCtx.drawImage(drawCanvas, 0, 0);
-        if (ourPlayerCanvas) this.pipCtx.drawImage(ourPlayerCanvas, 0, 0);
-        if (uiCanvas) this.pipCtx.drawImage(uiCanvas, 0, 0);
-        this.drawCoordinateBar(sourceSize, infoBarHeight);
+        if (mapCanvas) ctx.drawImage(mapCanvas, 0, 0);
+        if (drawCanvas) ctx.drawImage(drawCanvas, 0, 0);
+        if (ourPlayerCanvas) ctx.drawImage(ourPlayerCanvas, 0, 0);
+        if (uiCanvas) ctx.drawImage(uiCanvas, 0, 0);
+        this.drawCoordinateBar(ctx, sourceSize, infoBarHeight);
     }
 
     getInfoBarHeight(sourceSize) {
@@ -446,8 +355,7 @@ class PictureInPictureManager {
         return value.toFixed(decimals);
     }
 
-    drawCoordinateBar(sourceSize, height) {
-        const ctx = this.pipCtx;
+    drawCoordinateBar(ctx, sourceSize, height) {
         const top = sourceSize;
         const {bounds, x, y} = this.getCoordinateInfo();
         const minX = this.formatCoordinate(bounds?.min?.[0]);
@@ -486,11 +394,6 @@ class PictureInPictureManager {
     destroy() {
         this.lifecycleGeneration++;
         void this.releaseWindowControls();
-        if (document.pictureInPictureElement) {
-            document.exitPictureInPicture().catch((e) => {
-                window.logger?.warn(CATEGORIES.SYSTEM, 'PiP_DestroyExitFailed', {error: e?.message});
-            });
-        }
         if (this.overlayWindow && !this.overlayWindow.closed) {
             this.closingOverlay = true;
             this.overlayWindow.close();
@@ -504,26 +407,13 @@ class PictureInPictureManager {
             this._onCanvasSizeChanged = null;
         }
 
-        if (this.videoElement) {
-            if (this._onLeavePip) {
-                this.videoElement.removeEventListener('leavepictureinpicture', this._onLeavePip);
-                this._onLeavePip = null;
-            }
-            if (this.videoElement.parentNode) {
-                this.videoElement.parentNode.removeChild(this.videoElement);
-            }
-            this.videoElement = null;
-        }
-
-        this.pipCanvas = null;
-        this.pipCtx = null;
         this.canvasManager = null;
         this.radarRenderer = null;
         this.windowControlSupported = false;
     }
 
     isSupported() {
-        return this.windowControlSupported || document.pictureInPictureEnabled === true;
+        return this.windowControlSupported;
     }
 }
 
