@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -44,7 +45,7 @@ func TestExternalMapsHandlerServesFilesWithoutBinaryETag(t *testing.T) {
 	}
 
 	s := &HTTPServer{}
-	req := httptest.NewRequest("GET", "/images/Maps/game/zone.webp", nil)
+	req := httptest.NewRequest(http.MethodGet, "/images/Maps/game/zone.webp", http.NoBody)
 	rec := httptest.NewRecorder()
 	s.externalFSHandler("/images/Maps/", os.DirFS(dir)).ServeHTTP(rec, req)
 
