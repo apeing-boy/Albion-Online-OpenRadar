@@ -71,6 +71,9 @@ jobs:
       - name: Build all artifacts
         run: make all-in-one VERSION=${{ env.VERSION }}
 
+      - name: Keep unpacked staging files for Windows resource overlay
+        run: rm -f dist/OpenRadar-bundle-*.zip dist/OpenRadar-bundle-*.zip.sha256
+
       - uses: actions/upload-artifact@v7
         with:
           name: dist
@@ -163,9 +166,8 @@ jobs:
           name: windows-enhanced
           path: dist
 
-      - name: Regenerate checksums (Windows .exe changed)
-        working-directory: dist
-        run: sha256sum OpenRadar-linux-amd64 OpenRadar-windows-amd64.exe README-linux.txt README-windows.txt > checksums-sha256.txt
+      - name: Rebuild common ZIP after Windows resource overlay
+        run: make checksums bundle VERSION=${{ env.VERSION }}
 
       - name: Generate release notes
         uses: orhun/git-cliff-action@v4
@@ -183,8 +185,5 @@ jobs:
             --draft \
             --title "OpenRadar v${{ env.VERSION }}" \
             --notes-file dist/RELEASE.md \
-            dist/OpenRadar-linux-amd64 \
-            dist/OpenRadar-windows-amd64.exe \
-            dist/README-linux.txt \
-            dist/README-windows.txt \
-            dist/checksums-sha256.txt
+            "dist/OpenRadar-bundle-${VERSION}.zip" \
+            "dist/OpenRadar-bundle-${VERSION}.zip.sha256"

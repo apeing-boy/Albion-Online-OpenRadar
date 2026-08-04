@@ -54,8 +54,9 @@ function createWindowsReadme(exeName: string): string {
 
 ## About
 
-OpenRadar is a native Go application (~95 MB) with all assets embedded.
-No external dependencies besides Npcap are required.
+OpenRadar is a native Go application with its versioned UI embedded.
+Map data is stored in the shared maps folder next to the binaries so it can be updated separately.
+Do not move the executable out of the extracted release folder. Npcap is also required.
 
 ## Installation
 
@@ -63,14 +64,17 @@ No external dependencies besides Npcap are required.
    Download: https://npcap.com/
    Direct link (v1.84): https://npcap.com/dist/npcap-1.84.exe
 
-2. **Launch ${exeName}**
+2. **Extract the complete release ZIP**
+   Keep ${exeName} and the maps folder together.
+
+3. **Launch ${exeName}**
    Double-click on ${exeName}
 
-3. **Select your network adapter**
+4. **Select your network adapter**
    Choose the adapter you use to connect to the Internet
    (DO NOT choose 127.0.0.1 or localhost)
 
-4. **Access the radar**
+5. **Access the radar**
    Open http://localhost:5001 in your browser
 
 ## Command-line Options
@@ -100,7 +104,7 @@ GitHub: https://github.com/Nouuu/Albion-Online-OpenRadar
 ## Technical Details
 
 - Native Go backend (v2.0)
-- Single binary with embedded assets
+- Embedded UI with external maps/game, maps/coords.json and maps/walk
 - Server on port 5001 (HTTP + WebSocket on /ws)
 - Captures UDP traffic on port 5056
 
@@ -113,8 +117,9 @@ function createLinuxReadme(exeName: string): string {
 
 ## About
 
-OpenRadar is a native Go application (~95 MB) with all assets embedded.
-No external dependencies besides libpcap are required.
+OpenRadar is a native Go application with its versioned UI embedded.
+Map data is stored in the shared maps folder next to the binaries so it can be updated separately.
+Do not move the executable out of the extracted release folder. libpcap is also required.
 
 ## Installation
 
@@ -129,10 +134,13 @@ No external dependencies besides libpcap are required.
    Arch Linux:
      sudo pacman -S libpcap libcap
 
-2. **Make executable**
+2. **Extract the complete release ZIP and enter its folder**
+   Keep ${exeName} and the maps folder together.
+
+3. **Make executable**
    chmod +x ${exeName}
 
-3. **Grant capture permissions** (choose ONE option)
+4. **Grant capture permissions** (choose ONE option)
 
    Option A - Run as root (simple):
      sudo ./${exeName}
@@ -150,11 +158,11 @@ No external dependencies besides libpcap are required.
    Note: Capabilities are removed if the file is modified or moved.
    Re-run setcap after updates.
 
-4. **Select your network adapter**
+5. **Select your network adapter**
    Choose the adapter you use to connect to the Internet
    (DO NOT choose 127.0.0.1 or localhost)
 
-5. **Access the radar**
+6. **Access the radar**
    Open http://localhost:5001 in your browser
 
 ## Command-line Options
@@ -199,7 +207,7 @@ GitHub: https://github.com/Nouuu/Albion-Online-OpenRadar
 ## Technical Details
 
 - Native Go backend (v2.0)
-- Single binary with embedded assets
+- Embedded UI with external maps/game, maps/coords.json and maps/walk
 - Server on port 5001 (HTTP + WebSocket on /ws)
 - Captures UDP traffic on port 5056
 

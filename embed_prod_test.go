@@ -25,3 +25,12 @@ func TestProdEmbedExcludesTestsAndFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProdEmbedExcludesExternalMaps(t *testing.T) {
+	if _, err := fs.Stat(Images, "web/images/Maps"); err == nil {
+		t.Fatal("web/images/Maps must not be embedded in production binaries")
+	}
+	if _, err := fs.Stat(Images, "web/images/icon.png"); err != nil {
+		t.Fatalf("non-map image assets must remain embedded: %v", err)
+	}
+}

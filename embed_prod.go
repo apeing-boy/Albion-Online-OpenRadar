@@ -4,10 +4,11 @@ package assets
 
 import "embed"
 
-// Embedded static assets for the web server (production build)
-// These are compiled into the binary for single-file distribution
+// Embedded static assets for the web server (production build).
+// Maps are deliberately excluded and shipped next to the binaries so they can
+// be updated without rebuilding OpenRadar.
 
-//go:embed all:web/images
+//go:embed all:web/images/Enemies all:web/images/Flags all:web/images/Items all:web/images/Resources all:web/images/Spells web/images/favicon.ico web/images/icon.png
 var Images embed.FS
 
 // Scripts omits `all:` so Go embed skips _*.test.js and __fixtures__/.
