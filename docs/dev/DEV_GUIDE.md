@@ -6,12 +6,12 @@ Technical reference for contributors working on OpenRadar's Go backend and JavaS
 
 ## Architecture overview
 
-OpenRadar is a single-binary Go application that:
+OpenRadar is a Go application with embedded versioned UI assets and external map data that:
 
 - Captures Albion Online network packets (UDP 5056) via `gopacket` and libpcap, on one or more interfaces simultaneously.
 - Parses Photon Protocol18 packets into events, requests, and responses.
 - Sends parsed data to the browser via a WebSocket on `/ws`.
-- Serves a static SPA from embedded assets (`//go:embed`).
+- Serves a static SPA from embedded assets (`//go:embed`) and maps from `maps/` next to the production binary.
 
 ### Project structure
 
@@ -26,12 +26,12 @@ OpenRadar/
 │   └── logger/               # JSONL structured logging
 ├── web/                      # Frontend (embedded at build)
 │   ├── scripts/              # JavaScript modules (handlers, drawings, utils)
-│   ├── images/               # Maps, items, spells icons
+│   ├── images/               # Source maps plus embedded items/spells/UI icons
 │   ├── public/               # HTML, fonts
 │   └── ao-bin-dumps/         # Game data, minified
 ├── tools/                    # Node.js utilities (asset refresh, generators)
 ├── e2e/                      # Playwright regression suite
-├── embed.go                  # //go:embed directives
+├── embed_prod.go             # //go:embed directives (maps excluded)
 └── Makefile
 ```
 
@@ -93,20 +93,22 @@ Common targets:
 | `make refresh-codes` | fetch upstream, regenerate JS and Go mirrors |
 | `make build-linux` | Linux binary via Docker |
 | `make build-windows` | Windows `.exe` |
-| `make all-in-one` | full release artifacts (both binaries, READMEs, checksums) |
+| `make maps` | stage `maps/game`, `maps/coords.json` and `maps/walk` in `dist/` |
+| `make bundle` | package both binaries and the shared maps directory into one ZIP |
+| `make all-in-one` | full release ZIP (both binaries, maps, READMEs, checksums) |
 | `make release-dry-run` | full build plus generated `RELEASE.md` for review |
 | `make release` | create a draft GitHub release (requires `TAG=x.y.z`) |
 | `make clean` | remove build artifacts |
 
 ### Asset embedding
 
-`embed.go` wires the frontend into the Go binary:
+`embed_prod.go` wires versioned frontend assets into the Go binary. The `web/images/Maps` tree is intentionally excluded:
 
 ```go
 //go:embed web/scripts
 var Scripts embed.FS
 
-//go:embed web/images
+//go:embed all:web/images/Enemies all:web/images/Flags all:web/images/Items all:web/images/Resources all:web/images/Spells web/images/favicon.ico web/images/icon.png
 var Images embed.FS
 
 //go:embed web/public
@@ -116,7 +118,7 @@ var Public embed.FS
 var Sounds embed.FS
 ```
 
-`embed_prod.go` is the production embed; `embed_dev.go` reads from disk when `-dev` is passed. The CI guard in `.github/workflows/ci.yml` rejects unprefixed `*.test.js` so the production binary cannot ship test artifacts. `embed_prod_test.go` walks the embed FS to confirm.
+Production serves `/images/Maps/` from `maps/` next to the executable. It requires `maps/game/` and `maps/coords.json`; `maps/walk/` is reserved for editable navigation masks. `embed_dev.go` reads the source tree when `-dev` is passed. The CI guard in `.github/workflows/ci.yml` rejects unprefixed `*.test.js` so the production binary cannot ship test artifacts. `embed_prod_test.go` verifies both test exclusion and map exclusion.
 
 ### Linux capability
 
@@ -133,7 +135,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./OpenRadar-linux
 `App` centralizes the runtime: logger, HTTP server, WebSocket handler, capture manager, TUI dashboard. Boot flow:
 
 1. Parse CLI flags (`-dev`, `-ip`, `-version`).
-2. `capture.ReadConfig(appDir)` loads `network.json`. Migration from the legacy `ip.txt` runs once if present.
+2. Production resolves `appDir` from `os.Executable()` (development uses the working directory), then `capture.ReadConfig(appDir)` loads `network.json`. Migration from the legacy `ip.txt` runs once if present.
 3. `logger.New(logsDir, cfg.Logging.ServerLogsEnabled)` so the first events route correctly without waiting for the frontend.
 4. `capture.NewManager(ctx)` plus `manager.Reconfigure(target)` to open every selected interface.
 5. If `cfg.Logging.PcapRecording`, `manager.StartRecording(filepath.Join(logsDir, "captures"))`.

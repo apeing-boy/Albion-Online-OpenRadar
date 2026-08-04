@@ -22,12 +22,14 @@ BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)
 
 DIST := dist
+MAPS_SOURCE := web/images/Maps
+BUNDLE_NAME := OpenRadar-bundle-$(VERSION).zip
 
 .PHONY: help dev run css css-watch vendors test lint lint-fix clean \
         install-tools assets restore-assets refresh-assets \
         update-ao-data download-icons download-spells download-map \
         refresh-codes gen-codes \
-        build-linux build-windows readmes checksums all-in-one \
+        build-linux build-windows maps readmes checksums bundle all-in-one \
         release release-dry-run
 
 .DEFAULT_GOAL := help
@@ -49,7 +51,7 @@ help: ## Display help
 	@echo "  restore-assets    Restore source tree after assets step"
 	@echo "  build-linux       Build Linux binary (native on Linux, Docker elsewhere)"
 	@echo "  build-windows     Build Windows .exe (native on Windows, Docker elsewhere)"
-	@echo "  all-in-one        assets + both binaries + READMEs + checksums + restore"
+	@echo "  all-in-one        assets + both binaries + external maps + one ZIP"
 	@echo ""
 	@echo "Assets refresh (committed to repo):"
 	@echo "  update-ao-data    Update Albion Online data JSON files"
@@ -189,16 +191,33 @@ endif
 readmes: | $(DIST) ## Generate platform-specific README files
 	npx tsx tools/generate-readmes.ts --output-dir=$(DIST) --version=$(VERSION)
 
-checksums: | $(DIST) ## Generate SHA256 checksums for dist/ contents
-	cd $(DIST) && sha256sum OpenRadar-linux-amd64 OpenRadar-windows-amd64.exe README-linux.txt README-windows.txt > checksums-sha256.txt
+maps: | $(DIST) ## Stage external map data shared by both binaries
+	rm -rf $(DIST)/maps
+	mkdir -p $(DIST)/maps/game $(DIST)/maps/walk
+	cp -R $(MAPS_SOURCE)/game/. $(DIST)/maps/game/
+	cp $(MAPS_SOURCE)/coords.json $(DIST)/maps/coords.json
 
-all-in-one: ## Full release artifacts (both binaries + READMEs + checksums)
+checksums: | $(DIST) ## Generate SHA256 checksums for files inside the bundle
+	cd $(DIST) && find OpenRadar-linux-amd64 OpenRadar-windows-amd64.exe \
+		README-linux.txt README-windows.txt maps -type f -print0 | \
+		sort -z | xargs -0 sha256sum > checksums-sha256.txt
+
+bundle: | $(DIST) ## Package Windows, Linux and one shared maps directory
+	rm -f $(DIST)/$(BUNDLE_NAME) $(DIST)/$(BUNDLE_NAME).sha256
+	cd $(DIST) && zip -q -r $(BUNDLE_NAME) \
+		OpenRadar-linux-amd64 OpenRadar-windows-amd64.exe \
+		README-linux.txt README-windows.txt checksums-sha256.txt maps
+	cd $(DIST) && sha256sum $(BUNDLE_NAME) > $(BUNDLE_NAME).sha256
+
+all-in-one: ## Full release bundle (both binaries + shared external maps)
 	trap '$(MAKE) restore-assets' EXIT; \
 	$(MAKE) assets && \
 	$(MAKE) build-linux && \
 	$(MAKE) build-windows && \
+	$(MAKE) maps && \
 	$(MAKE) readmes && \
-	$(MAKE) checksums
+	$(MAKE) checksums && \
+	$(MAKE) bundle
 	@echo ""
 	@echo "Build complete. Artifacts in $(DIST)/:"
 	@ls -la $(DIST)/
@@ -226,11 +245,8 @@ endif
 		--draft \
 		--title "OpenRadar v$(TAG)" \
 		--notes-file $(DIST)/RELEASE.md \
-		$(DIST)/OpenRadar-linux-amd64 \
-		$(DIST)/OpenRadar-windows-amd64.exe \
-		$(DIST)/README-linux.txt \
-		$(DIST)/README-windows.txt \
-		$(DIST)/checksums-sha256.txt
+		$(DIST)/OpenRadar-bundle-$(TAG).zip \
+		$(DIST)/OpenRadar-bundle-$(TAG).zip.sha256
 	@echo ""
 	@echo "Draft release created. Review and publish at:"
 	@echo "  https://github.com/Nouuu/Albion-Online-OpenRadar/releases"

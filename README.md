@@ -37,8 +37,8 @@ reading.
 ### Windows
 
 1. Install **[Npcap](https://npcap.com/#download)** (required for packet capture).
-2. Download `OpenRadar-windows-amd64.exe` from [Releases](https://github.com/Nouuu/Albion-Online-OpenRadar/releases).
-3. Run it. The radar auto-selects your active LAN interfaces; the startup banner prints both the localhost URL and a `http://<your-lan-ip>:5001 (LAN)` URL when one is available.
+2. Download `OpenRadar-bundle-<version>.zip` from [Releases](https://github.com/Nouuu/Albion-Online-OpenRadar/releases) and extract the entire archive.
+3. Run `OpenRadar-windows-amd64.exe` without moving it away from the adjacent `maps` folder. The radar auto-selects your active LAN interfaces; the startup banner prints both the localhost URL and a `http://<your-lan-ip>:5001 (LAN)` URL when one is available.
 4. Open **http://localhost:5001** in your browser, or the LAN URL from a phone or second device on the same network.
 5. Launch Albion and start playing. To change which interfaces the radar listens on, open the **Settings -> Network** page.
 
@@ -49,15 +49,9 @@ reading.
 sudo apt install libpcap0.8  # Debian/Ubuntu
 sudo pacman -S libpcap  # Arch linux
 
-# Download and set permissions
-## Create a folder at /home/username/albion-radar
-mkdir ~/albion-radar
-
-### Move to the folder
-cd ~/albion-radar
-
-## Download latest release
-curl https://github.com/Nouuu/Albion-Online-OpenRadar/releases/latest/OpenRadar-linux-amd64
+# Download OpenRadar-bundle-<version>.zip from Releases and extract it
+unzip OpenRadar-bundle-<version>.zip -d albion-radar
+cd albion-radar
 
 ## set permissions
 chmod +x OpenRadar-linux-amd64
@@ -86,7 +80,22 @@ OpenRadar -ip X.X.X.X    # One-shot interface override by IP (does not write net
 OpenRadar -dev           # Development mode (read files from disk)
 ```
 
-Persistent interface selection lives in `network.json` next to the binary. Edit it from the **Settings -> Network** page in the browser, or by hand for headless setups.
+The extracted archive contains both Windows and Linux binaries plus one shared map dataset:
+
+```text
+OpenRadar-windows-amd64.exe
+OpenRadar-linux-amd64
+maps/game/
+maps/coords.json
+maps/walk/
+README-windows.txt
+README-linux.txt
+checksums-sha256.txt
+```
+
+The UI, scripts, icons, fonts, sounds and game databases remain embedded because they must match the application version. Maps are external so `maps/game`, `maps/coords.json` and future `maps/walk` data can be replaced without rebuilding either binary.
+
+Persistent interface selection (`network.json`) and runtime logs (`logs/`) are created next to the binary. These paths remain correct when OpenRadar is launched through a Windows shortcut or from another working directory.
 
 ### Using ExitLag?
 

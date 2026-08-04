@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +28,7 @@ type HTTPServer struct {
 	wsHandler *WebSocketHandler
 	// Filesystems (can be embed.FS or os.DirFS)
 	images  fs.FS
+	maps    fs.FS
 	scripts fs.FS
 	data    fs.FS
 	sounds  fs.FS
@@ -72,6 +74,7 @@ func NewHTTPServer(
 	mgr NetworkManager,
 	allInterfaces []capture.NetworkInterface,
 	appDir string,
+	mapsDir string,
 	recorder Recorder,
 	captureDir string,
 ) (*HTTPServer, error) {
@@ -96,6 +99,10 @@ func NewHTTPServer(
 	if err != nil {
 		fmt.Printf("[HTTP] Warning: failed to load styles: %v\n", err)
 	}
+	mapsFS, err := externalMapsFS(mapsDir)
+	if err != nil {
+		return nil, err
+	}
 
 	// Initialize template engine (required)
 	tmpl, err := templates.NewEngine(tmplFS, "internal/templates")
@@ -110,6 +117,7 @@ func NewHTTPServer(
 		logger:    log,
 		wsHandler: wsHandler,
 		images:    imagesFS,
+		maps:      mapsFS,
 		scripts:   scriptsFS,
 		data:      dataFS,
 		sounds:    soundsFS,
@@ -154,6 +162,7 @@ func NewHTTPServerDev(
 		logger:    log,
 		wsHandler: wsHandler,
 		images:    os.DirFS(appDir + "/web/images"),
+		maps:      os.DirFS(appDir + "/web/images/Maps"),
 		scripts:   os.DirFS(appDir + "/web/scripts"),
 		data:      os.DirFS(appDir + "/web/ao-bin-dumps"),
 		sounds:    os.DirFS(appDir + "/web/sounds"),
@@ -201,6 +210,7 @@ func (s *HTTPServer) setupRoutes() {
 	// Items and Spells: serve fallback image if not found
 	s.mux.Handle("/images/Items/", s.fsHandlerWithFallback("/images/Items/", s.images, "Items", "_default.webp"))
 	s.mux.Handle("/images/Spells/", s.fsHandlerWithFallback("/images/Spells/", s.images, "Spells", "_default.webp"))
+	s.mux.Handle("/images/Maps/", s.externalFSHandler("/images/Maps/", s.maps))
 	s.mux.Handle("/images/", s.fsHandler("/images/", s.images))
 	s.mux.Handle("/scripts/", s.gzipFSHandlerDirect("/scripts/", s.scripts))
 	s.mux.Handle("/sounds/", s.fsHandler("/sounds/", s.sounds))
@@ -219,6 +229,18 @@ func (s *HTTPServer) setupRoutes() {
 		s.networkAPI.Register(apiMux)
 	}
 	s.mux.Handle("/api/", noStore(apiMux))
+}
+
+func externalMapsFS(mapsDir string) (fs.FS, error) {
+	gameInfo, err := os.Stat(filepath.Join(mapsDir, "game"))
+	if err != nil || !gameInfo.IsDir() {
+		return nil, fmt.Errorf("external maps not found: expected %s", filepath.Join(mapsDir, "game"))
+	}
+	coordsInfo, err := os.Stat(filepath.Join(mapsDir, "coords.json"))
+	if err != nil || coordsInfo.IsDir() {
+		return nil, fmt.Errorf("external map coordinates not found: expected %s", filepath.Join(mapsDir, "coords.json"))
+	}
+	return os.DirFS(mapsDir), nil
 }
 
 func noStore(h http.Handler) http.Handler {
@@ -299,6 +321,16 @@ func (s *HTTPServer) fsHandler(prefix string, fsys fs.FS) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.setStaticCacheHeaders(w, "", false)
+		handler.ServeHTTP(w, r)
+	})
+}
+
+// externalFSHandler does not use the binary build fingerprint: external maps
+// may be replaced independently and must be revalidated by the browser.
+func (s *HTTPServer) externalFSHandler(prefix string, fsys fs.FS) http.Handler {
+	handler := http.StripPrefix(prefix, http.FileServer(http.FS(fsys)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
 		handler.ServeHTTP(w, r)
 	})
 }

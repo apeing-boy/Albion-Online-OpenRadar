@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -32,7 +33,6 @@ var (
 const (
 	serverPort      = 5001
 	shutdownTimeout = 10 * time.Second
-	pcapCaptureDir  = "./logs/captures"
 )
 
 type App struct {
@@ -74,10 +74,11 @@ func main() {
 }
 
 func runApp(cfg Config) bool {
-	appDir, err := os.Getwd()
+	appDir, err := resolveAppDir(cfg.devMode)
 	if err != nil {
-		exitWithError("Failed to get working directory", err)
+		exitWithError("Failed to resolve application directory", err)
 	}
+	captureDir := filepath.Join(appDir, "logs", "captures")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -119,7 +120,7 @@ func runApp(cfg Config) bool {
 	}
 
 	if cfgPersisted.Logging.PcapRecording {
-		if err := manager.StartRecording(pcapCaptureDir); err != nil {
+		if err := manager.StartRecording(captureDir); err != nil {
 			logger.PrintWarn("PKT", "pcap recording could not start: %v", err)
 			_ = capture.MutateConfig(appDir, func(cfg *capture.Config) {
 				cfg.Logging.PcapRecording = false
@@ -169,6 +170,23 @@ func runApp(cfg Config) bool {
 	return restartRequested
 }
 
+// resolveAppDir keeps mutable runtime data next to a packaged executable even
+// when it is launched through a shortcut or from another working directory.
+// Development mode intentionally keeps the repository working directory.
+func resolveAppDir(devMode bool) (string, error) {
+	if devMode {
+		return os.Getwd()
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	return filepath.Dir(executable), nil
+}
+
 // Config holds command-line configuration
 type Config struct {
 	devMode     bool
@@ -204,10 +222,14 @@ func newApp(
 	allIfaces []capture.NetworkInterface,
 	serverLogsEnabled bool,
 ) (*App, error) {
-	log := logger.New("./logs", serverLogsEnabled)
+	logsDir := filepath.Join(appDir, "logs")
+	captureDir := filepath.Join(logsDir, "captures")
+	log := logger.New(logsDir, serverLogsEnabled)
 	wsHandler := server.NewWebSocketHandler(log)
 
-	httpServer, err := createHTTPServer(cfg.devMode, appDir, wsHandler, log, Version, BuildTime, manager, allIfaces)
+	httpServer, err := createHTTPServer(
+		cfg.devMode, appDir, wsHandler, log, Version, BuildTime, manager, allIfaces, captureDir,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP server: %w", err)
 	}
@@ -242,12 +264,13 @@ func createHTTPServer(
 	buildTime string,
 	mgr *capture.Manager,
 	allIfaces []capture.NetworkInterface,
+	captureDir string,
 ) (*server.HTTPServer, error) {
 	if devMode {
 		logger.PrintInfo("MODE", "Development mode: reading files from disk")
-		return server.NewHTTPServerDev(serverPort, appDir, wsHandler, log, version, buildTime, mgr, allIfaces, mgr, pcapCaptureDir)
+		return server.NewHTTPServerDev(serverPort, appDir, wsHandler, log, version, buildTime, mgr, allIfaces, mgr, captureDir)
 	}
-	logger.PrintInfo("MODE", "Production mode: using embedded assets")
+	logger.PrintInfo("MODE", "Production mode: using embedded UI and external maps")
 	return server.NewHTTPServer(
 		serverPort,
 		assets.Images,
@@ -263,8 +286,9 @@ func createHTTPServer(
 		mgr,
 		allIfaces,
 		appDir,
+		filepath.Join(appDir, "maps"),
 		mgr,
-		pcapCaptureDir,
+		captureDir,
 	)
 }
 
